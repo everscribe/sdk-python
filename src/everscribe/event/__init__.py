@@ -6,7 +6,9 @@ Mirrors ``sdk-go/pkg/event`` and ``sdk-node/src/event``.
 
 from __future__ import annotations
 
+from .context import event_scope, from_context, prepare_event, run_with_event
 from .event import Event
+from .origin import client_ip, origin_from_request
 from .redact import (
     REDACTED,
     DiffConfig,
@@ -38,6 +40,14 @@ __all__ = [
     # Protocols
     "StatusCapture",
     "Logger",
+    # Request context
+    "from_context",
+    "run_with_event",
+    "event_scope",
+    "prepare_event",
+    # Origin
+    "origin_from_request",
+    "client_ip",
     # Redaction
     "with_redacted_fields",
     "apply_redaction",
