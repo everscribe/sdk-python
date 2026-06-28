@@ -49,6 +49,11 @@ packages = ["src/everscribe"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+filterwarnings = [
+    # Starlette's TestClient warns about the installed httpx version; external,
+    # test-only, and unrelated to the SDK.
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+]
 
 [tool.mypy]
 python_version = "3.10"
