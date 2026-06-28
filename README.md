@@ -545,4 +545,3 @@ token = m.mint_token(minter.TokenOptions(...))
 - `base_url` — override the API host (tests, staging).
 - `request_timeout` — per-request timeout in seconds.
 - `transport` — supply a custom transport callable (primarily for tests).
-```
