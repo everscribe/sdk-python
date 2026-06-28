@@ -3,18 +3,48 @@
 Python SDK for the Everscribe audit-log API, built to parity with the Go and
 Node SDKs. Two coordinated surfaces:
 
-- ``everscribe.recorder`` — append-only event ingest.
-- ``everscribe.minter`` — short-lived embed tokens for frontend audit views.
+- :mod:`everscribe.recorder` - append-only event ingest.
+- :mod:`everscribe.minter` - short-lived embed tokens for frontend audit views.
 
 Bind credentials once with :func:`new` (or :func:`new_from_env`) and create
-per-surface subclients from the returned :class:`Client`.
+per-surface subclients from the returned :class:`Client`::
 
-The public API is assembled across subsequent build steps; this module will
-re-export the root ``Client``, the constructors, and the ``Event`` type.
+    import everscribe
+
+    es = everscribe.new(project_id, api_key)
+    rec = es.new_recorder()
+    rec.record(everscribe.Event("user.login"))
+
+The core is zero-dependency (standard library only). The optional ASGI adapter
+lives in :mod:`everscribe.asgi` (install the ``fastapi`` extra).
 """
 
 from __future__ import annotations
 
+from . import event, minter, recorder
+from .client import (
+    EVERSCRIBE_API_KEY,
+    EVERSCRIBE_PROJECT_ID,
+    Client,
+    new,
+    new_from_env,
+)
+from .event import Event
+
 __version__ = "0.0.0"
 
-__all__ = ["__version__"]
+__all__ = [
+    "__version__",
+    # Root client
+    "Client",
+    "new",
+    "new_from_env",
+    "EVERSCRIBE_PROJECT_ID",
+    "EVERSCRIBE_API_KEY",
+    # Event model
+    "Event",
+    # Subpackages
+    "event",
+    "recorder",
+    "minter",
+]
