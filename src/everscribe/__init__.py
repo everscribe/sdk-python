@@ -1,7 +1,6 @@
 """Everscribe Python SDK.
 
-Python SDK for the Everscribe audit-log API, built to parity with the Go and
-Node SDKs. Two coordinated surfaces:
+Python SDK for the Everscribe audit-log API. Two coordinated surfaces:
 
 - :mod:`everscribe.recorder` - append-only event ingest.
 - :mod:`everscribe.minter` - short-lived embed tokens for frontend audit views.

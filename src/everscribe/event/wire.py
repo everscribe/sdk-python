@@ -1,8 +1,7 @@
 """Serializes events to their on-the-wire JSON shape.
 
-Field names are already snake_case; the omit rules match the Go SDK's
-``omitempty`` / ``omitzero`` and the Node SDK's ``eventToWire`` so the wire
-format is byte-compatible across all three SDKs.
+Field names are snake_case and empty fields are omitted, producing the
+canonical audit-log wire format.
 """
 
 from __future__ import annotations
@@ -20,8 +19,7 @@ if TYPE_CHECKING:
 
 
 def _iso(dt: datetime) -> str:
-    """Format a datetime as RFC 3339 / ISO 8601 with a ``Z`` UTC suffix,
-    matching JavaScript's ``Date.toISOString()`` and Go's ``time.Time``.
+    """Format a datetime as RFC 3339 / ISO 8601 with a ``Z`` UTC suffix.
     Naive datetimes are assumed to be UTC."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -65,7 +63,7 @@ def event_to_wire(e: "Event") -> dict[str, Any]:
 
 
 def _actor_to_wire(a: Actor) -> dict[str, Any]:
-    # `type` is always present (Go: no omitempty); other fields use omitempty.
+    # `type` is always present; other fields are omitted when empty.
     w: dict[str, Any] = {"type": a.type}
     if a.id:
         w["id"] = a.id
@@ -97,9 +95,9 @@ def _origin_to_wire(o: Origin) -> "dict[str, Any] | None":
 
 
 def result_to_wire(r: Result) -> "dict[str, Any] | None":
-    """Mirrors Go's ``Result.MarshalJSON``: ``Exception`` -> ``.message``,
-    empty-string message omitted, all-empty Result returns ``None`` (omitted
-    by the caller)."""
+    """Serializes a ``Result``: ``Exception`` -> ``.message``, empty-string
+    message omitted, all-empty Result returns ``None`` (omitted by the
+    caller)."""
     w: dict[str, Any] = {}
     if r.status:
         w["status"] = r.status

@@ -1,8 +1,7 @@
 """Buffered recorder: wraps another recorder with asynchronous, batched
 writes on a background daemon thread.
 
-The Python analog of the Go SDK's channel + ``select`` loop. Events are held
-in an in-memory buffer and flushed to the inner recorder when the pending
+Events are held in an in-memory buffer and flushed to the inner recorder when the pending
 batch reaches ``flush_size`` or ``flush_interval`` elapses, whichever comes
 first. ``record`` never blocks on the network (it only enqueues), so it is
 safe to call from async handlers - the flush I/O happens off the event loop

@@ -1,7 +1,4 @@
-"""Minter: short-lived embed tokens for frontend audit-log views.
-
-Mirrors ``sdk-go/pkg/minter`` and ``sdk-node/src/minter``.
-"""
+"""Minter: short-lived embed tokens for frontend audit-log views."""
 
 from __future__ import annotations
 

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect x="0" y="0" width="200" height="200" fill="#1e3a5f"/>
+  <!-- { ES } -->
+  <text x="100" y="124" font-family="'Helvetica Neue', 'Arial', sans-serif"
+        font-weight="500" font-size="72" fill="#f0f4f8"
+        text-anchor="middle">{ ES }</text>
+</svg>

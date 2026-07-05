@@ -1,10 +1,16 @@
-# everscribe (Python SDK)
+<p align="center">
+  <img src="assets/everscribe.svg" alt="Everscribe" height="64" align="middle">
+  &nbsp;&nbsp;<b>+</b>&nbsp;&nbsp;
+  <img src="assets/python.svg" alt="Python" height="56" align="middle">
+</p>
 
-Python SDK for the Everscribe audit-log API. Two coordinated surfaces:
+# sdk-python
 
-- **Recorder** — append-only event ingest. Records who did what, when, on
-  what resource, and — for mutation events — how the resource changed.
-- **Minter** — mints short-lived embed tokens that let a customer's frontend
+Python SDK for the [Everscribe](https://everscribe.io)  audit-log API. Two coordinated surfaces:
+
+- **Recorder** - append-only event ingest. Records who did what, when, on
+  what resource, and, for mutation events, how the resource changed.
+- **Minter** - mints short-lived embed tokens that let a customer's frontend
   mount the Everscribe embeddable component (e.g. `<EverscribeEvents />`) to
   display events without exposing the project API key to the browser.
 
@@ -42,7 +48,7 @@ from everscribe import minter           # Client, TokenOptions
 from everscribe.asgi import EverscribeMiddleware  # ASGI adapter (needs the fastapi extra)
 ```
 
-The top-level module is the entry point — bind credentials once and hand out
+The top-level module is the entry point - bind credentials once and hand out
 per-surface clients. Customers who only need one surface can call
 `recorder.new` or `minter.Client` directly to skip the SDK-client step.
 
@@ -64,7 +70,7 @@ rec = es.new_recorder()
 ```
 
 For 12-factor / containerized deployments, read credentials from the
-environment instead — `new_from_env` reads `EVERSCRIBE_PROJECT_ID` and
+environment instead - `new_from_env` reads `EVERSCRIBE_PROJECT_ID` and
 `EVERSCRIBE_API_KEY` and raises `ValueError` naming the missing variable if
 either is unset or empty:
 
@@ -110,7 +116,7 @@ one-line shortcut for ingest-only setups.
 | `auto_idempotency_key` | Copy `event.id` into `event.idempotency_key` at send time when the latter is empty.      | off            |
 
 > **Async note.** `record()` only enqueues an event (it never blocks on the
-> network — a background thread does the HTTP flush), so it's safe to call from
+> network - a background thread does the HTTP flush), so it's safe to call from
 > `async def` handlers without touching the event loop.
 
 ### 2. Define your actor resolver
@@ -140,7 +146,7 @@ The resolver must not consume the request body.
 ### 3. Wire up the middleware
 
 **Ordering matters.** The audit middleware must run **after** any middleware
-that provisions the request with session data — the producer (session) has to
+that provisions the request with session data - the producer (session) has to
 run before the consumer (audit, which calls your `resolve_actor`).
 
 In Starlette/FastAPI, the `middleware=[...]` list runs **outermost-first**, so
@@ -225,7 +231,7 @@ the document are silently skipped.
 
 #### Recording multiple events per request
 
-Some handlers fan out — one privileged operation can affect many resources,
+Some handlers fan out - one privileged operation can affect many resources,
 and each one is independently audit-worthy (e.g. revoking every active session
 for a compromised account). Call `from_context()` once per extra event so each
 gets a fresh clone of the per-request template (Actor, Origin) without sharing
@@ -253,7 +259,7 @@ async def revoke_all(request):
 ```
 
 The buffered recorder coalesces these (and events from other concurrent
-requests) into a single batch call to the ingestion API on each flush — no
+requests) into a single batch call to the ingestion API on each flush - no
 need to assemble batches yourself.
 
 ---
@@ -272,7 +278,7 @@ async def lock_user(request):
         return PlainTextResponse("not found", status_code=404)
     if user.locked:
         return Response(status_code=200)
-    # no action set on the two paths above — we don't record attempts to lock a
+    # no action set on the two paths above - we don't record attempts to lock a
     # missing or already-locked user
 
     e = current_event()
@@ -282,7 +288,7 @@ async def lock_user(request):
     return Response(status_code=200)
 ```
 
-**Overriding the resolver's `actor`** — when there's no session yet (login,
+**Overriding the resolver's `actor`** - when there's no session yet (login,
 signup) or when the actor isn't a session user (webhooks, system tasks), the
 handler overrides `event.actor` directly. Login is the canonical case: at
 handler entry the resolver returns `anonymous` because the session doesn't
@@ -307,7 +313,7 @@ async def login(request):
     return issue_session_cookie(user)
 ```
 
-**Explicit `result` wins over auto-capture** — when the HTTP status doesn't
+**Explicit `result` wins over auto-capture** - when the HTTP status doesn't
 reflect the operation's audit outcome. Password reset is the canonical case:
 anti-enumeration security requires an identical user-facing response whether the
 email matched or not, but audit monitoring still needs to know which happened:
@@ -355,25 +361,25 @@ class Event:
 ```
 
 Fields use plain values with empty defaults (`""`, `0`, empty nested
-dataclasses) rather than optionals — empty means "not set", and the wire
+dataclasses) rather than optionals - empty means "not set", and the wire
 serializer omits empty fields. The JSON sent to the ingestion API is
-**snake_case** and byte-compatible with the Go and Node SDKs.
+**snake_case** with empty fields omitted.
 
 `project_id` is bound once at `new` and sent on every request as part of the
 URL path.
 
-`tenant_id` groups events one level above the actor — set it when you run a
+`tenant_id` groups events one level above the actor - set it when you run a
 multi-tenant SaaS and want events queryable per workspace, org, or connected
 account. Single-tenant apps leave it blank.
 
-`result.message` is free-form and special-cases exceptions — pass an
+`result.message` is free-form and special-cases exceptions - pass an
 `Exception` directly and it serializes as `str(exc)`:
 
 ```python
 e.result = Result(status="error", message=err)
 ```
 
-Two helpers attach metadata in slog style:
+Two helpers attach metadata as key/value pairs:
 
 ```python
 e.with_field("reason", "policy_violation")
@@ -395,7 +401,7 @@ rec.record(e)
 
 ## BufferedRecorder
 
-`recorder.new` (and `Client.new_recorder`) returns a `BufferedRecorder` —
+`recorder.new` (and `Client.new_recorder`) returns a `BufferedRecorder` -
 events enqueue on an in-memory buffer and a flush is triggered when the size
 threshold or interval is reached, flushed on a background thread. Tuning knobs
 live in the [Quickstart options table](#1-bind-credentials-and-construct-subclients);
@@ -412,13 +418,13 @@ string):
 | `"block"`        | Wait for space (until the buffer drains or the recorder closes).     |
 | `"error"`        | Raise `BufferFullError`.                                             |
 
-A full buffer means you're misconfigured — resize, speed up downstream, or
+A full buffer means you're misconfigured - resize, speed up downstream, or
 scale out. Watch `stats().dropped`.
 
 ### `flush()`, `close()`, and `stats()`
 
 `flush(timeout=None)` synchronously drains everything buffered at the time of
-the call — useful for tests and graceful shutdown sync points. `close()` runs a
+the call - useful for tests and graceful shutdown sync points. `close()` runs a
 final drain, so you don't need to `flush()` before `close()`. Both are no-ops
 after `close()`.
 
@@ -438,18 +444,18 @@ class BufferedStats:
 
 The recorder package exports three error classes:
 
-- `HTTPError` — non-2xx response from the ingestion endpoint. Read
+- `HTTPError` - non-2xx response from the ingestion endpoint. Read
   `status_code` and `body`; call `transient()` (5xx + 429) to distinguish
   retryable failures.
-- `BufferFullError` — overflow with `overflow="error"`.
-- `DrainTimeoutError` — `close()` exceeded `drain_timeout` with events still
+- `BufferFullError` - overflow with `overflow="error"`.
+- `DrainTimeoutError` - `close()` exceeded `drain_timeout` with events still
   pending.
 
 ---
 
 ## Idempotency
 
-`event.idempotency_key` is for caller-supplied stable keys — webhook event IDs,
+`event.idempotency_key` is for caller-supplied stable keys - webhook event IDs,
 upstream request IDs, anything that identifies "the same logical event" across
 retries the SDK can't see:
 
@@ -466,7 +472,7 @@ when the key is empty:
 rec = es.new_recorder(auto_idempotency_key=True)
 ```
 
-Off by default. Caller-supplied keys always win — auto-population only fills
+Off by default. Caller-supplied keys always win - auto-population only fills
 empty keys.
 
 ---
@@ -533,15 +539,15 @@ token = m.mint_token(minter.TokenOptions(...))
 
 - `ValueError` from client-side validation (caller-supplied options fail the
   SDK's checks; no HTTP call is made).
-- `MinterError` for non-2xx responses from the mint endpoint — `status_code`
-  matches the spec: 400 for invalid options, 401 for bad auth, 404 for
-  missing/soft-deleted project.
+- `MinterError` for non-2xx responses from the mint endpoint - `status_code`
+  is 400 for invalid options, 401 for bad auth, 404 for missing/soft-deleted
+  project.
 - A transport error (timeout, connection refused, network failure).
 
 ### Configuration
 
 `minter.Client` accepts options analogous to the recorder:
 
-- `base_url` — override the API host (tests, staging).
-- `request_timeout` — per-request timeout in seconds.
-- `transport` — supply a custom transport callable (primarily for tests).
+- `base_url` - override the API host (tests, staging).
+- `request_timeout` - per-request timeout in seconds.
+- `transport` - supply a custom transport callable (primarily for tests).

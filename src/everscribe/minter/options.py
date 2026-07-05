@@ -1,9 +1,7 @@
 """Token mint options and their client-side validation.
 
-Mirrors ``sdk-go/pkg/minter`` (``TokenOptions`` / ``marshal``) and
-``sdk-node/src/minter/options.ts`` (``tokenOptionsToWire``). Validation runs
-before any HTTP call; failures raise :class:`ValueError` and short-circuit the
-round-trip.
+Validation runs before any HTTP call; failures raise :class:`ValueError` and
+short-circuit the round-trip.
 """
 
 from __future__ import annotations
@@ -15,9 +13,9 @@ from typing import Any, List, Optional, Union
 
 from .columns import ALLOWED_COLUMNS
 
-# Lifetime bounds (in seconds) the server enforces on expires_in. Go expresses
-# these as time.Duration and Node as milliseconds; this SDK uses seconds to
-# match its other timeout options (request_timeout, flush_interval, ...).
+# Lifetime bounds (in seconds) the server enforces on expires_in. This SDK
+# uses seconds to match its other timeout options (request_timeout,
+# flush_interval, ...).
 MIN_EXPIRES_IN = 60.0
 MAX_EXPIRES_IN = 24 * 60 * 60.0
 

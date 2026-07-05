@@ -3,9 +3,8 @@ StatusCapture / Logger protocols.
 
 Fields use plain values with empty defaults ("" for strings, 0 for ints,
 empty structs for nested objects) rather than optionals. Empty means
-"not set"; the wire serializer omits empty fields. This mirrors the Go
-SDK's zero-value structs (``omitempty`` / ``omitzero``) and the monorepo's
-no-optional-pointers convention.
+"not set"; the wire serializer omits empty fields. Plain values are used
+throughout in place of optional pointers.
 """
 
 from __future__ import annotations

@@ -1,6 +1,5 @@
 """Tests for the event domain: construction, builders, redaction, and the
-on-the-wire serialization format (which must stay byte-compatible with the
-Go and Node SDKs)."""
+on-the-wire serialization format (snake_case with empty fields omitted)."""
 
 from __future__ import annotations
 

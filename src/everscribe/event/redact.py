@@ -1,8 +1,7 @@
 """JSON Pointer (RFC 6901) redaction for event diffs.
 
-Mirrors ``sdk-go/pkg/event`` (``marshalRedacted`` / ``redactPath``) and
-``sdk-node/src/event/redact.ts``: values at the given pointer paths are
-replaced with the string ``"[REDACTED]"`` before they leave the process.
+Values at the given pointer paths are replaced with the string
+``"[REDACTED]"`` before they leave the process.
 """
 
 from __future__ import annotations
@@ -46,8 +45,8 @@ def with_redacted_fields(*paths: str) -> DiffOption:
 
 def apply_redaction(value: Any, paths: "list[str] | tuple[str, ...]" = ()) -> Any:
     """Round-trip ``value`` through JSON to normalize types, then redact the
-    listed JSON Pointer paths in place. Mirrors Go's ``marshalRedacted``: the
-    result is a wire-shape value the serializer can ``json.dumps`` directly.
+    listed JSON Pointer paths in place. The result is a wire-shape value the
+    serializer can ``json.dumps`` directly.
 
     Raises ``TypeError``/``ValueError`` if ``value`` is not JSON-serializable;
     :meth:`Event.diff` catches this and leaves the change unset.

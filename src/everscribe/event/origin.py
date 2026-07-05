@@ -1,9 +1,7 @@
 """Framework-agnostic HTTP request origin extraction.
 
-Mirrors the Go SDK's ``originFromRequest`` / ``clientIP`` and the Node SDK's
-``originFromRequest`` / ``clientIp``. Takes a plain header mapping and an
-optional remote address so any framework (or the bundled ASGI adapter) can
-feed it.
+Takes a plain header mapping and an optional remote address so any framework
+(or the bundled ASGI adapter) can feed it.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ def origin_from_request(
 def client_ip(headers: "Mapping[str, str] | None", remote_addr: str = "") -> str:
     """Extract the client IP from ``X-Forwarded-For`` (first entry), then
     ``X-Real-IP``, then the supplied ``remote_addr`` (with a trailing
-    ``:port`` stripped, matching the sibling SDKs)."""
+    ``:port`` stripped)."""
     if headers is None:
         headers = {}
     xff = _header(headers, "x-forwarded-for")

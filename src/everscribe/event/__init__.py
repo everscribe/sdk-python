@@ -1,7 +1,5 @@
 """Event domain: the on-the-wire event model, redaction, and (added in a
 later step) request-context helpers.
-
-Mirrors ``sdk-go/pkg/event`` and ``sdk-node/src/event``.
 """
 
 from __future__ import annotations

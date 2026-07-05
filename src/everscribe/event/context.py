@@ -1,9 +1,8 @@
 """Request-scoped event context, backed by :mod:`contextvars`.
 
-The Python analog of the Go SDK's ``context.Context`` value and the Node
-SDK's ``AsyncLocalStorage``. A framework adapter installs a template Event
-(and an optional :class:`StatusCapture`) for the duration of a request;
-handlers pull a fresh, independent Event out of it with :func:`from_context`.
+A framework adapter installs a template Event (and an optional
+:class:`StatusCapture`) for the duration of a request; handlers pull a fresh,
+independent Event out of it with :func:`from_context`.
 
 ``contextvars`` propagate across ``await`` boundaries and into tasks, so this
 works unchanged under both sync (WSGI) and async (ASGI) servers.
@@ -72,8 +71,8 @@ def run_with_event(
     template: Event, capture: "StatusCapture | None", fn: Callable[[], T]
 ) -> T:
     """Run ``fn`` with ``template`` and ``capture`` installed in scope, and
-    return its result. The callback form mirrors the Go/Node SDKs; async
-    adapters generally prefer :func:`event_scope`."""
+    return its result. Async adapters generally prefer
+    :func:`event_scope`."""
     with event_scope(template, capture):
         return fn()
 

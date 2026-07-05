@@ -1,6 +1,6 @@
 """ASGI middleware for FastAPI / Starlette (and any ASGI app).
 
-The Python analog of the Node SDK's Express adapter. It:
+It:
 
 1. Builds an Event template (actor from ``resolve_actor``, origin from the
    request) and installs it in the request-scoped context so handlers can pull

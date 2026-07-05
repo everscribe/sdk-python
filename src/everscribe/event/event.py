@@ -55,7 +55,7 @@ class Event:
         return self
 
     def with_fields(self, *args: Any) -> "Event":
-        """Set metadata from alternating key/value pairs, slog-style::
+        """Set metadata from alternating key/value pairs::
 
             e.with_fields("reason", "spam", "severity", "high")
 
@@ -71,7 +71,7 @@ class Event:
 
     def diff(self, before: Any, after: Any, *opts: DiffOption) -> "Event":
         """Record a state transition for a mutation event. ``before`` and
-        ``after`` are JSON-normalized (matching Go's marshal round-trip) and
+        ``after`` are JSON-normalized (round-tripped through JSON) and
         any :func:`with_redacted_fields` paths are scrubbed before storage.
         The audit-log API computes the patch on ingest.
 

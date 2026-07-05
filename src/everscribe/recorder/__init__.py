@@ -1,7 +1,6 @@
 """Recorder: append-only event ingest over HTTP with async buffering.
 
-Mirrors ``sdk-go/pkg/recorder`` and ``sdk-node/src/recorder``. The HTTP
-transport uses the standard library (``urllib``); :class:`BufferedRecorder`
+The HTTP transport uses the standard library (``urllib``); :class:`BufferedRecorder`
 flushes batches on a background daemon thread. :func:`new` is the recommended
 entry point.
 """
