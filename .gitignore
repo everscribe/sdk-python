@@ -25,3 +25,7 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# subagent scratch reports
+.*-report.md
+.grpc-spike.md
