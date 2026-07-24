@@ -1,5 +1,5 @@
 """Event domain types: Actor, Target, Origin, Result, Change, and the
-StatusCapture / Logger protocols.
+OutcomeCapture / Logger protocols.
 
 Fields use plain values with empty defaults ("" for strings, 0 for ints,
 empty structs for nested objects) rather than optionals. Empty means
@@ -96,14 +96,26 @@ class Change:
 
 
 @runtime_checkable
-class StatusCapture(Protocol):
-    """Captures the response status for an in-flight request, so
-    ``prepare_event`` can auto-populate :class:`Result` when the handler
-    hasn't set one. Implemented by framework adapters."""
+class OutcomeCapture(Protocol):
+    """Reports the adapter-derived outcome for an in-flight call, so
+    ``prepare_event`` (mid-handler) and ``end_event`` (after the handler has
+    genuinely finished) can auto-populate an event's :class:`Result` when the
+    handler hasn't set one itself.
+
+    ``None`` means the call has not produced an outcome yet. This replaces
+    an earlier ``status: int`` sentinel, where ``0`` meant "nothing
+    written": that works for HTTP, but gRPC's OK status IS code 0, so an
+    integer cannot carry both "no outcome yet" and "outcome is code 0" for a
+    transport-neutral capture. Implemented by framework adapters.
+    :func:`result_from_http_status` is the opt-in helper an HTTP-shaped
+    adapter uses to build the :class:`Result` its ``outcome`` property
+    returns.
+    """
 
     @property
-    def status(self) -> int:
-        """Captured HTTP status code, or 0 if no response has been written."""
+    def outcome(self) -> "Result | None":
+        """The captured outcome, or ``None`` if nothing has been produced
+        yet."""
         ...
 
 
@@ -124,6 +136,6 @@ __all__ = [
     "Origin",
     "Result",
     "Change",
-    "StatusCapture",
+    "OutcomeCapture",
     "Logger",
 ]

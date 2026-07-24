@@ -1,7 +1,7 @@
 """The canonical audit record and its builder methods.
 
 Construct via ``Event("action")`` for non-HTTP callers (background jobs,
-cron, CLI). HTTP handlers prefer ``from_context()`` (see
+cron, CLI). HTTP handlers prefer ``new_from_context()`` (see
 ``everscribe.event.context``), which additionally populates Origin and
 Actor from the request. Populate the handler-specific fields (``action``,
 ``target``, ``metadata``, optionally ``result``) and pass to
