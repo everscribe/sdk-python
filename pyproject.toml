@@ -31,10 +31,12 @@ dependencies = []
 # ASGI adapter (FastAPI, Starlette, and any other ASGI app). FastAPI bundles
 # Starlette, so depending on Starlette alone covers both.
 fastapi = ["starlette>=0.27"]
+flask = ["flask>=2"]
 dev = [
     "pytest>=7",
     "starlette>=0.27",
     "httpx>=0.24",
+    "flask>=2",
     "mypy>=1.5",
     "ruff>=0.1",
 ]
