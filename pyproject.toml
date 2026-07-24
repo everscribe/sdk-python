@@ -32,11 +32,13 @@ dependencies = []
 # Starlette, so depending on Starlette alone covers both.
 fastapi = ["starlette>=0.27"]
 flask = ["flask>=2"]
+django = ["django>=4"]
 dev = [
     "pytest>=7",
     "starlette>=0.27",
     "httpx>=0.24",
     "flask>=2",
+    "django>=4",
     "mypy>=1.5",
     "ruff>=0.1",
 ]
@@ -61,6 +63,13 @@ filterwarnings = [
 python_version = "3.10"
 strict = true
 files = ["src/everscribe"]
+
+[[tool.mypy.overrides]]
+# Django ships no py.typed marker / inline stubs (unlike Starlette, which
+# this project's ASGI adapter depends on cleanly). Only the adapter's own
+# code is type-checked strictly; Django's surface is treated as untyped.
+module = "django.*"
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
