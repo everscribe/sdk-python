@@ -15,7 +15,7 @@ from everscribe.asgi import (
     current_event,
     event_from_request,
 )
-from everscribe.event import Actor, Event, Result, from_context
+from everscribe.event import Actor, Event, Result, new_from_context
 
 
 class FakeRecorder:
@@ -160,12 +160,12 @@ def test_sync_endpoint_context_propagates_to_threadpool() -> None:
     assert rec.events[0].action == "sync.event"
 
 
-def test_multiple_events_via_from_context() -> None:
+def test_multiple_events_via_new_from_context() -> None:
     rec = FakeRecorder()
 
     async def multi(request):  # type: ignore[no-untyped-def]
         current_event().action = "primary"
-        extra = from_context()  # fresh clone of the template
+        extra = new_from_context()  # fresh clone of the template
         extra.action = "extra"
         rec.record(extra)  # recorded manually
         return PlainTextResponse("ok")
