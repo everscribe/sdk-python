@@ -33,12 +33,15 @@ dependencies = []
 fastapi = ["starlette>=0.27"]
 flask = ["flask>=2"]
 django = ["django>=4"]
+grpc = ["grpcio>=1.60"]
 dev = [
     "pytest>=7",
     "starlette>=0.27",
     "httpx>=0.24",
     "flask>=2",
     "django>=4",
+    "grpcio>=1.60",
+    "types-grpcio",
     "mypy>=1.5",
     "ruff>=0.1",
 ]
