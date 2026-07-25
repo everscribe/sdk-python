@@ -56,7 +56,7 @@ class Client:
         self._api_key = api_key
 
     @classmethod
-    def from_env(cls) -> "Client":
+    def from_env(cls) -> Client:
         """Construct a Client from ``EVERSCRIBE_PROJECT_ID`` and
         ``EVERSCRIBE_API_KEY``. Raises :class:`ValueError` naming the missing
         variable if either is unset or empty after trimming."""
@@ -94,9 +94,9 @@ def new_from_env() -> Client:
 
 
 __all__ = [
+    "EVERSCRIBE_API_KEY",
+    "EVERSCRIBE_PROJECT_ID",
     "Client",
     "new",
     "new_from_env",
-    "EVERSCRIBE_PROJECT_ID",
-    "EVERSCRIBE_API_KEY",
 ]

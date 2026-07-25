@@ -32,7 +32,7 @@ class FakeCapture:
     status: int
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         if self.status == 0:
             return None
         return result_from_http_status(self.status)
@@ -193,7 +193,7 @@ def test_prepare_event_explicit_result_wins_over_capture() -> None:
 
 class FakeRecorder:
     def __init__(self) -> None:
-        self.events: "list[Event]" = []
+        self.events: list[Event] = []
 
     def record(self, e: Event) -> None:
         self.events.append(e)

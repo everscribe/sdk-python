@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, List, Optional, Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 
@@ -28,13 +28,13 @@ class FakeInner:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.batches: List[List[Event]] = []
-        self.singles: List[Event] = []
-        self.fail: Optional[BaseException] = None
-        self.block: Optional[threading.Event] = None
+        self.batches: list[list[Event]] = []
+        self.singles: list[Event] = []
+        self.fail: BaseException | None = None
+        self.block: threading.Event | None = None
 
     def record_batch(
-        self, events: Sequence[Event], *, timeout: "float | None" = None
+        self, events: Sequence[Event], *, timeout: float | None = None
     ) -> None:
         if self.block is not None:
             self.block.wait(timeout=5)
@@ -43,11 +43,11 @@ class FakeInner:
         with self.lock:
             self.batches.append(list(events))
 
-    def record(self, e: Event, *, timeout: "float | None" = None) -> None:
+    def record(self, e: Event, *, timeout: float | None = None) -> None:
         with self.lock:
             self.singles.append(e)
 
-    def all_events(self) -> List[Event]:
+    def all_events(self) -> list[Event]:
         with self.lock:
             out = list(self.singles)
             for b in self.batches:
@@ -60,16 +60,16 @@ class SerialInner:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.singles: List[Event] = []
+        self.singles: list[Event] = []
 
-    def record(self, e: Event, *, timeout: "float | None" = None) -> None:
+    def record(self, e: Event, *, timeout: float | None = None) -> None:
         with self.lock:
             self.singles.append(e)
 
 
 # Large size/interval so the worker only flushes on explicit flush/close;
 # used by overflow tests that need events to stay buffered.
-_QUIET = dict(flush_size=10_000, flush_interval=3600.0)
+_QUIET = {"flush_size": 10_000, "flush_interval": 3600.0}
 
 
 def test_flush_triggers_on_size() -> None:

@@ -6,13 +6,13 @@ Takes a plain header mapping and an optional remote address so any framework
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 from .types import Origin
 
 
 def origin_from_request(
-    headers: "Mapping[str, str] | None", remote_addr: str = ""
+    headers: Mapping[str, str] | None, remote_addr: str = ""
 ) -> Origin:
     """Extract network context from request headers and a remote address.
     Respects ``X-Forwarded-For`` (first entry) and ``X-Real-IP`` before
@@ -27,7 +27,7 @@ def origin_from_request(
     return o
 
 
-def client_ip(headers: "Mapping[str, str] | None", remote_addr: str = "") -> str:
+def client_ip(headers: Mapping[str, str] | None, remote_addr: str = "") -> str:
     """Extract the client IP from ``X-Forwarded-For`` (first entry), then
     ``X-Real-IP``, then the supplied ``remote_addr`` (with a trailing
     ``:port`` stripped)."""
@@ -46,7 +46,7 @@ def client_ip(headers: "Mapping[str, str] | None", remote_addr: str = "") -> str
     return remote_addr[:last_colon] if last_colon >= 0 else remote_addr
 
 
-def _header(headers: "Mapping[str, str]", name: str) -> str:
+def _header(headers: Mapping[str, str], name: str) -> str:
     """Case-insensitive single-header lookup. Returns "" if absent."""
     value = headers.get(name)
     if value is not None:
@@ -57,4 +57,4 @@ def _header(headers: "Mapping[str, str]", name: str) -> str:
     return ""
 
 
-__all__ = ["origin_from_request", "client_ip"]
+__all__ = ["client_ip", "origin_from_request"]

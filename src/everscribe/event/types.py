@@ -113,7 +113,7 @@ class OutcomeCapture(Protocol):
     """
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         """The captured outcome, or ``None`` if nothing has been produced
         yet."""
         ...
@@ -132,10 +132,10 @@ class Logger(Protocol):
 __all__ = [
     "UNSET",
     "Actor",
-    "Target",
-    "Origin",
-    "Result",
     "Change",
-    "OutcomeCapture",
     "Logger",
+    "Origin",
+    "OutcomeCapture",
+    "Result",
+    "Target",
 ]

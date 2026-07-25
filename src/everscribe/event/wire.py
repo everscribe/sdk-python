@@ -7,12 +7,11 @@ canonical audit-log wire format.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
-
-from .types import UNSET, Actor, Change, Origin, Result, Target
 
 # Imported for typing only; avoids a runtime import cycle with event.py.
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from .types import UNSET, Actor, Change, Origin, Result, Target
 
 if TYPE_CHECKING:
     from .event import Event
@@ -31,7 +30,7 @@ def _iso(dt: datetime) -> str:
     return s
 
 
-def event_to_wire(e: "Event") -> dict[str, Any]:
+def event_to_wire(e: Event) -> dict[str, Any]:
     """Serialize an :class:`Event` to its wire shape (a plain dict ready for
     ``json.dumps``)."""
     wire: dict[str, Any] = {
@@ -74,7 +73,7 @@ def _actor_to_wire(a: Actor) -> dict[str, Any]:
     return w
 
 
-def _target_to_wire(t: Target) -> "dict[str, Any] | None":
+def _target_to_wire(t: Target) -> dict[str, Any] | None:
     w: dict[str, Any] = {}
     if t.type:
         w["type"] = t.type
@@ -83,7 +82,7 @@ def _target_to_wire(t: Target) -> "dict[str, Any] | None":
     return w or None
 
 
-def _origin_to_wire(o: Origin) -> "dict[str, Any] | None":
+def _origin_to_wire(o: Origin) -> dict[str, Any] | None:
     w: dict[str, Any] = {}
     if o.ip:
         w["ip"] = o.ip
@@ -94,7 +93,7 @@ def _origin_to_wire(o: Origin) -> "dict[str, Any] | None":
     return w or None
 
 
-def result_to_wire(r: Result) -> "dict[str, Any] | None":
+def result_to_wire(r: Result) -> dict[str, Any] | None:
     """Serializes a ``Result``: ``Exception`` -> ``.message``, empty-string
     message omitted, all-empty Result returns ``None`` (omitted by the
     caller)."""
@@ -113,7 +112,7 @@ def result_to_wire(r: Result) -> "dict[str, Any] | None":
     return w or None
 
 
-def _change_to_wire(c: Change) -> "dict[str, Any] | None":
+def _change_to_wire(c: Change) -> dict[str, Any] | None:
     w: dict[str, Any] = {}
     if c.before is not UNSET:
         w["before"] = c.before

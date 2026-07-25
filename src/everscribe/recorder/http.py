@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from ..event import Event, event_to_wire, prepare_event
 from .errors import HTTPError
@@ -38,10 +38,10 @@ _MAX_ERROR_BODY = 4096
 
 def _urllib_transport(
     url: str, body: bytes, headers: Mapping[str, str], timeout: float
-) -> "tuple[int, bytes]":
+) -> tuple[int, bytes]:
     req = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             resp.read()  # drain so the connection can be reused
             status: int = resp.status
             return status, b""
@@ -62,7 +62,7 @@ class HTTPRecorder:
         base_url: str = DEFAULT_BASE_URL,
         request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
         auto_idempotency_key: bool = False,
-        transport: "Transport | None" = None,
+        transport: Transport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.project_id = project_id
@@ -71,7 +71,7 @@ class HTTPRecorder:
         self._auto_idempotency_key = auto_idempotency_key
         self._transport: Transport = transport or _urllib_transport
 
-    def record(self, e: Event, *, timeout: "float | None" = None) -> None:
+    def record(self, e: Event, *, timeout: float | None = None) -> None:
         """POST a single event. Empty-``action`` events are no-ops."""
         if e is None or e.action == "":
             return
@@ -81,7 +81,7 @@ class HTTPRecorder:
         self._post(self._events_path(), body, timeout)
 
     def record_batch(
-        self, events: Sequence[Event], *, timeout: "float | None" = None
+        self, events: Sequence[Event], *, timeout: float | None = None
     ) -> None:
         """POST multiple events in one request. Empty-``action`` events are
         filtered out; an all-empty (or empty) batch is a no-op."""
@@ -112,7 +112,7 @@ class HTTPRecorder:
     def _batch_path(self) -> str:
         return f"/v1/projects/{self.project_id}/events/batch"
 
-    def _post(self, path: str, body: bytes, timeout: "float | None") -> None:
+    def _post(self, path: str, body: bytes, timeout: float | None) -> None:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -125,4 +125,4 @@ class HTTPRecorder:
         raise HTTPError(status, text)
 
 
-__all__ = ["HTTPRecorder", "Transport", "DEFAULT_BASE_URL", "DEFAULT_REQUEST_TIMEOUT"]
+__all__ = ["DEFAULT_BASE_URL", "DEFAULT_REQUEST_TIMEOUT", "HTTPRecorder", "Transport"]

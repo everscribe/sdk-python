@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from flask import Flask, g
 
 from everscribe.event import Actor, Event, current_event
@@ -12,7 +10,7 @@ from everscribe.flask import ActorResolver, EverscribeFlask
 
 class FakeRecorder:
     def __init__(self) -> None:
-        self.events: List[Event] = []
+        self.events: list[Event] = []
 
     def record(self, e: Event) -> None:
         self.events.append(e)
@@ -20,8 +18,8 @@ class FakeRecorder:
 
 def make_app(
     *,
-    recorder: "Optional[FakeRecorder]" = None,
-    resolve_actor: "Optional[ActorResolver]" = None,
+    recorder: FakeRecorder | None = None,
+    resolve_actor: ActorResolver | None = None,
     testing: bool = True,
 ) -> Flask:
     app = Flask(__name__)

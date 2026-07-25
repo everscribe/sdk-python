@@ -33,7 +33,7 @@ Requires Starlette (``pip install "everscribe[fastapi]"``).
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 try:
     from starlette.requests import Request
@@ -86,7 +86,7 @@ class _StatusCapture:
         self._status = status
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         if self._status == 0:
             return None
         return result_from_http_status(self._status)
@@ -109,9 +109,9 @@ class EverscribeMiddleware:
         self,
         app: ASGIApp,
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         self.app = app
         self.recorder = recorder
@@ -148,8 +148,8 @@ class EverscribeMiddleware:
 
 
 __all__ = [
-    "EverscribeMiddleware",
     "ActorResolver",
+    "EverscribeMiddleware",
     "current_event",
     "event_from_request",
 ]

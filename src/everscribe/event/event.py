@@ -46,15 +46,15 @@ class Event:
     metadata: dict[str, Any] = field(default_factory=dict)
     origin: Origin = field(default_factory=Origin)
     result: Result = field(default_factory=Result)
-    change: "Change | None" = None
+    change: Change | None = None
     idempotency_key: str = ""
 
-    def with_field(self, key: str, value: Any) -> "Event":
+    def with_field(self, key: str, value: Any) -> Event:
         """Set a single metadata key/value pair. Returns ``self`` for chaining."""
         self.metadata[key] = value
         return self
 
-    def with_fields(self, *args: Any) -> "Event":
+    def with_fields(self, *args: Any) -> Event:
         """Set metadata from alternating key/value pairs::
 
             e.with_fields("reason", "spam", "severity", "high")
@@ -69,7 +69,7 @@ class Event:
             self.metadata[key] = args[i + 1]
         return self
 
-    def diff(self, before: Any, after: Any, *opts: DiffOption) -> "Event":
+    def diff(self, before: Any, after: Any, *opts: DiffOption) -> Event:
         """Record a state transition for a mutation event. ``before`` and
         ``after`` are JSON-normalized (round-tripped through JSON) and
         any :func:`with_redacted_fields` paths are scrubbed before storage.
@@ -92,7 +92,7 @@ class Event:
 
     def raw_diff(
         self, before: Any = None, after: Any = None, patch: Any = None
-    ) -> "Event":
+    ) -> Event:
         """Escape hatch for callers that already have JSON-shaped before/after
         state, or who want to supply their own precomputed RFC 6902 patch. Any
         of the three may be ``None``; if all three are ``None``, the call is a

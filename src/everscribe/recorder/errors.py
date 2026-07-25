@@ -39,4 +39,4 @@ class DrainTimeoutError(Exception):
         super().__init__(message)
 
 
-__all__ = ["HTTPError", "BufferFullError", "DrainTimeoutError"]
+__all__ = ["BufferFullError", "DrainTimeoutError", "HTTPError"]

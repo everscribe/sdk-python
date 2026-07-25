@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
@@ -20,7 +18,7 @@ from everscribe.event import Actor, Event, Result, new_from_context
 
 class FakeRecorder:
     def __init__(self) -> None:
-        self.events: List[Event] = []
+        self.events: list[Event] = []
 
     def record(self, e: Event) -> None:
         self.events.append(e)
@@ -29,8 +27,8 @@ class FakeRecorder:
 def make_app(
     routes: list,
     *,
-    recorder: "Optional[FakeRecorder]" = None,
-    resolve_actor: "Optional[ActorResolver]" = None,
+    recorder: FakeRecorder | None = None,
+    resolve_actor: ActorResolver | None = None,
 ) -> Starlette:
     app = Starlette(routes=routes)
     app.add_middleware(

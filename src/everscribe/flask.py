@@ -35,8 +35,8 @@ Requires Flask (``pip install "everscribe[flask]"``).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import ExitStack
-from typing import Callable
 
 try:
     from flask import Flask, Response, g, request
@@ -85,7 +85,7 @@ class _OutcomeCapture:
 
     def __init__(self) -> None:
         self._status = 0
-        self._error: "BaseException | None" = None
+        self._error: BaseException | None = None
 
     def set_status(self, status: int) -> None:
         self._status = status
@@ -94,7 +94,7 @@ class _OutcomeCapture:
         self._error = err
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         if self._error is not None:
             return Result(status="error", code=500, message=self._error)
         if self._status == 0:
@@ -118,11 +118,11 @@ class EverscribeFlask:
 
     def __init__(
         self,
-        app: "Flask | None" = None,
+        app: Flask | None = None,
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         self.recorder = recorder
         self.resolve_actor: ActorResolver = resolve_actor or (lambda: _ANONYMOUS)
@@ -134,9 +134,9 @@ class EverscribeFlask:
         self,
         app: Flask,
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         if recorder is not None:
             self.recorder = recorder
@@ -165,7 +165,7 @@ class EverscribeFlask:
             capture.set_status(response.status_code)
         return response
 
-    def _teardown_request(self, exc: "BaseException | None") -> None:
+    def _teardown_request(self, exc: BaseException | None) -> None:
         state = g.pop(_STATE_KEY, None)
         if state is None:
             return
@@ -181,4 +181,4 @@ class EverscribeFlask:
             stack.close()
 
 
-__all__ = ["EverscribeFlask", "ActorResolver", "current_event"]
+__all__ = ["ActorResolver", "EverscribeFlask", "current_event"]

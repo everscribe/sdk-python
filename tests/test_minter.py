@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import List, Mapping, Tuple
+from typing import ClassVar
 
 import pytest
 
@@ -18,7 +19,6 @@ from everscribe.minter import (
     TokenOptions,
     token_options_to_wire,
 )
-
 
 # --- validation / wire -----------------------------------------------------
 
@@ -162,13 +162,13 @@ def test_full_wire_shape() -> None:
 
 class RecordingTransport:
     def __init__(self, status: int, body: bytes) -> None:
-        self.calls: List[Tuple[str, bytes, Mapping[str, str], float]] = []
+        self.calls: list[tuple[str, bytes, Mapping[str, str], float]] = []
         self.status = status
         self.body = body
 
     def __call__(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
-    ) -> "Tuple[int, bytes]":
+    ) -> tuple[int, bytes]:
         self.calls.append((url, body, headers, timeout))
         return self.status, self.body
 
@@ -178,7 +178,7 @@ def test_mint_token_success_returns_jwt() -> None:
     c = Client("proj1", "key1", base_url="https://x.test", transport=t)
     token = c.mint_token(TokenOptions(tenant_id="acme"))
     assert token == "jwt.abc"
-    url, body, headers, timeout = t.calls[0]
+    url, body, headers, _timeout = t.calls[0]
     assert url == "https://x.test/v1/projects/proj1/embed-tokens"
     assert headers["Authorization"] == "Bearer key1"
     assert json.loads(body) == {"tenant_id": "acme"}
@@ -219,11 +219,11 @@ def test_mint_token_timeout_override() -> None:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    received: "List[Tuple[str, bytes, str]]" = []
+    received: ClassVar[list[tuple[str, bytes, str]]] = []
     reply_status = 201
     reply_body = b'{"token": "real.jwt"}'
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
         type(self).received.append(
@@ -237,7 +237,7 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def _serve() -> "Tuple[HTTPServer, str]":
+def _serve() -> tuple[HTTPServer, str]:
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     host, port = server.server_address

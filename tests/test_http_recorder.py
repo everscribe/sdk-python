@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import List, Mapping, Tuple
+from typing import ClassVar
 
 import pytest
 
@@ -19,13 +20,13 @@ class RecordingTransport:
     """Captures posted requests and returns a canned response."""
 
     def __init__(self, status: int = 202, body: bytes = b"") -> None:
-        self.calls: List[Tuple[str, bytes, Mapping[str, str], float]] = []
+        self.calls: list[tuple[str, bytes, Mapping[str, str], float]] = []
         self.status = status
         self.body = body
 
     def __call__(
         self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
-    ) -> "Tuple[int, bytes]":
+    ) -> tuple[int, bytes]:
         self.calls.append((url, body, headers, timeout))
         return self.status, self.body
 
@@ -37,7 +38,7 @@ def test_record_posts_single_event() -> None:
     t = RecordingTransport()
     r = HTTPRecorder("proj1", "key1", base_url="https://x.test", transport=t)
     r.record(Event("user.login"))
-    url, body, headers, timeout = t.calls[0]
+    url, _body, headers, timeout = t.calls[0]
     assert url == "https://x.test/v1/projects/proj1/events"
     assert headers["Authorization"] == "Bearer key1"
     assert headers["Content-Type"] == "application/json"
@@ -63,7 +64,7 @@ def test_record_batch_wraps_in_events_key_and_filters_empty() -> None:
     t = RecordingTransport()
     r = HTTPRecorder("p", "k", base_url="https://x.test", transport=t)
     r.record_batch([Event("a"), Event(), Event("b")])
-    url, body, _, _ = t.calls[0]
+    url, _body, _, _ = t.calls[0]
     assert url == "https://x.test/v1/projects/p/events/batch"
     payload = t.last_json()
     assert [e["action"] for e in payload["events"]] == ["a", "b"]
@@ -138,10 +139,10 @@ def test_timeout_override_passed_to_transport() -> None:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    received: "List[Tuple[str, bytes, str]]" = []
+    received: ClassVar[list[tuple[str, bytes, str]]] = []
     reply_status = 202
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
         auth = self.headers.get("Authorization", "")
@@ -154,7 +155,7 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def _serve() -> "Tuple[HTTPServer, str]":
+def _serve() -> tuple[HTTPServer, str]:
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

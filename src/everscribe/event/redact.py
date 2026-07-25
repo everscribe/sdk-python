@@ -7,8 +7,9 @@ Values at the given pointer paths are replaced with the string
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 REDACTED = "[REDACTED]"
 
@@ -43,7 +44,7 @@ def with_redacted_fields(*paths: str) -> DiffOption:
     return apply
 
 
-def apply_redaction(value: Any, paths: "list[str] | tuple[str, ...]" = ()) -> Any:
+def apply_redaction(value: Any, paths: list[str] | tuple[str, ...] = ()) -> Any:
     """Round-trip ``value`` through JSON to normalize types, then redact the
     listed JSON Pointer paths in place. The result is a wire-shape value the
     serializer can ``json.dumps`` directly.
@@ -69,7 +70,7 @@ def _redact_path(doc: Any, pointer: str) -> Any:
     return _redact_tokens(doc, _split_pointer(pointer[1:]))
 
 
-def _redact_tokens(node: Any, tokens: "list[str]") -> Any:
+def _redact_tokens(node: Any, tokens: list[str]) -> Any:
     if not tokens:
         return REDACTED
     head, rest = tokens[0], tokens[1:]
@@ -93,7 +94,7 @@ def _split_pointer(body: str) -> list[str]:
     return [p.replace("~1", "/").replace("~0", "~") for p in body.split("/")]
 
 
-def _parse_uint(s: str) -> "int | None":
+def _parse_uint(s: str) -> int | None:
     """Parse a base-10 unsigned integer for a JSON Pointer array index.
     Returns ``None`` on empty input or any non-digit character."""
     if not s or any(c not in "0123456789" for c in s):
@@ -105,6 +106,6 @@ __all__ = [
     "REDACTED",
     "DiffConfig",
     "DiffOption",
-    "with_redacted_fields",
     "apply_redaction",
+    "with_redacted_fields",
 ]

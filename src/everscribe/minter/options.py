@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from .columns import ALLOWED_COLUMNS
 
@@ -42,23 +42,23 @@ class TokenOptions:
     #: Token lifetime in **seconds** (or a ``timedelta``). The server clamps to
     #: [:data:`MIN_EXPIRES_IN`, :data:`MAX_EXPIRES_IN`]. ``0`` uses the server
     #: default (1 hour).
-    expires_in: "Union[float, timedelta]" = 0.0
+    expires_in: float | timedelta = 0.0
     #: Whitelist of Event field names. ``None`` = no restriction; ``[]`` is
     #: rejected.
-    allowed_columns: "Optional[List[str]]" = None
+    allowed_columns: list[str] | None = None
     #: Allowed actions - exact ("user.login") or suffix wildcard ("user.*").
     #: ``None`` = no restriction; ``[]`` is rejected.
-    allowed_actions: "Optional[List[str]]" = None
+    allowed_actions: list[str] | None = None
     #: Restricts catalog fields the token's DSL/NLP queries may reference.
     #: ``None`` = no restriction; ``[]`` is rejected. Validated server-side.
-    allowed_fields: "Optional[List[str]]" = None
+    allowed_fields: list[str] | None = None
     #: Unlock the Query (advanced DSL) tab and ``?q=`` on the read API.
     allow_dsl_input: bool = False
     #: Unlock the AI ("Ask in plain English") tab and the NLP endpoint.
     allow_nlp: bool = False
 
 
-def token_options_to_wire(opts: TokenOptions) -> "dict[str, Any]":
+def token_options_to_wire(opts: TokenOptions) -> dict[str, Any]:
     """Validate ``opts`` and return the wire-shape request body. Raises
     :class:`ValueError` on any validation failure."""
     wire: dict[str, Any] = {}
@@ -128,8 +128,8 @@ def token_options_to_wire(opts: TokenOptions) -> "dict[str, Any]":
 
 
 __all__ = [
+    "MAX_EXPIRES_IN",
+    "MIN_EXPIRES_IN",
     "TokenOptions",
     "token_options_to_wire",
-    "MIN_EXPIRES_IN",
-    "MAX_EXPIRES_IN",
 ]

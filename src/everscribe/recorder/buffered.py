@@ -15,10 +15,10 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from queue import Empty, Queue
-from typing import Callable, Deque, List, Optional
 
 from ..event import Event, prepare_event
 from ..event.types import Logger
@@ -59,7 +59,7 @@ class BufferedStats:
 
 @dataclass
 class _FlushRequest:
-    ack: "Queue[Optional[BaseException]]"
+    ack: Queue[BaseException | None]
 
 
 class BufferedRecorder:
@@ -77,7 +77,7 @@ class BufferedRecorder:
         flush_timeout: float = DEFAULT_FLUSH_TIMEOUT,
         overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
-        logger: "Logger | None" = None,
+        logger: Logger | None = None,
     ) -> None:
         self._inner = inner
         self._buffer_size = buffer_size
@@ -89,8 +89,8 @@ class BufferedRecorder:
         self._logger: Logger = logger or logging.getLogger("everscribe.recorder")
 
         self._cond = threading.Condition()
-        self._buf: Deque[Event] = deque()
-        self._flush_requests: List[_FlushRequest] = []
+        self._buf: deque[Event] = deque()
+        self._flush_requests: list[_FlushRequest] = []
         self._closed = False
         self._dropped = 0
         self._flushed = 0
@@ -98,7 +98,7 @@ class BufferedRecorder:
 
         # Detect the optional batch capability once.
         rb = getattr(inner, "record_batch", None)
-        self._record_batch: Optional[Callable[..., None]] = rb if callable(rb) else None
+        self._record_batch: Callable[..., None] | None = rb if callable(rb) else None
 
         self._next_flush = time.monotonic() + flush_interval
         self._thread = threading.Thread(
@@ -149,12 +149,12 @@ class BufferedRecorder:
             # worker must act on new events / flush requests.
             self._cond.notify_all()
 
-    def flush(self, timeout: "float | None" = None) -> None:
+    def flush(self, timeout: float | None = None) -> None:
         """Force an immediate flush of all events buffered at call time and
         block until they are persisted. Raises the inner recorder's error if
         the flush failed, or ``TimeoutError`` if ``timeout`` elapses first.
         A no-op after :meth:`close`."""
-        ack: "Queue[Optional[BaseException]]" = Queue(maxsize=1)
+        ack: Queue[BaseException | None] = Queue(maxsize=1)
         with self._cond:
             if self._closed:
                 return
@@ -221,11 +221,11 @@ class BufferedRecorder:
             if closed:
                 return
 
-    def _flush_batch(self, batch: "List[Event]") -> "Optional[BaseException]":
+    def _flush_batch(self, batch: list[Event]) -> BaseException | None:
         n = len(batch)
         if n == 0:
             return None
-        err: Optional[BaseException] = None
+        err: BaseException | None = None
         try:
             if self._record_batch is not None:
                 self._record_batch(batch, timeout=self._flush_timeout)
@@ -236,9 +236,9 @@ class BufferedRecorder:
                 for e in batch:
                     try:
                         self._inner.record(e)
-                    except Exception as ex:  # one failure must not abort the batch
+                    except Exception as ex:  # noqa: BLE001 -- one failure must not abort the batch
                         err = ex
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001 -- audit flush must never propagate
             err = ex
         if err is not None:
             with self._cond:
@@ -258,12 +258,12 @@ class BufferedRecorder:
 
 
 __all__ = [
+    "DEFAULT_BUFFER_SIZE",
+    "DEFAULT_DRAIN_TIMEOUT",
+    "DEFAULT_FLUSH_INTERVAL",
+    "DEFAULT_FLUSH_SIZE",
+    "DEFAULT_FLUSH_TIMEOUT",
     "BufferedRecorder",
     "BufferedStats",
     "OverflowPolicy",
-    "DEFAULT_BUFFER_SIZE",
-    "DEFAULT_FLUSH_SIZE",
-    "DEFAULT_FLUSH_INTERVAL",
-    "DEFAULT_FLUSH_TIMEOUT",
-    "DEFAULT_DRAIN_TIMEOUT",
 ]

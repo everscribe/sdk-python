@@ -29,7 +29,7 @@ Requires Django (``pip install "everscribe[django]"``).
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 try:
     from django.conf import settings
@@ -78,7 +78,7 @@ class _OutcomeCapture:
 
     def __init__(self) -> None:
         self._status = 0
-        self._error: "BaseException | None" = None
+        self._error: BaseException | None = None
 
     def set_status(self, status: int) -> None:
         self._status = status
@@ -87,7 +87,7 @@ class _OutcomeCapture:
         self._error = err
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         if self._error is not None:
             return Result(status="error", code=500, message=self._error)
         if self._status == 0:
@@ -123,14 +123,14 @@ class EverscribeMiddleware:
 
     def __init__(
         self,
-        get_response: "Callable[[HttpRequest], HttpResponse]",
+        get_response: Callable[[HttpRequest], HttpResponse],
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         self.get_response = get_response
-        self.recorder: "Recorder | None" = (
+        self.recorder: Recorder | None = (
             recorder if recorder is not None else getattr(settings, "EVERSCRIBE_RECORDER", None)
         )
         self.resolve_actor: ActorResolver = (
@@ -174,8 +174,8 @@ def event_from_request(request: HttpRequest) -> Event:
 
 
 __all__ = [
-    "EverscribeMiddleware",
     "ActorResolver",
+    "EverscribeMiddleware",
     "current_event",
     "event_from_request",
 ]

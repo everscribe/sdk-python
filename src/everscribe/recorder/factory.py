@@ -23,7 +23,7 @@ def new(
     base_url: str = DEFAULT_BASE_URL,
     request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
     auto_idempotency_key: bool = False,
-    transport: "Transport | None" = None,
+    transport: Transport | None = None,
     # Buffering options
     buffer_size: int = DEFAULT_BUFFER_SIZE,
     flush_size: int = DEFAULT_FLUSH_SIZE,
@@ -31,7 +31,7 @@ def new(
     flush_timeout: float = DEFAULT_FLUSH_TIMEOUT,
     overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
     drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
-    logger: "Logger | None" = None,
+    logger: Logger | None = None,
 ) -> BufferedRecorder:
     """Return a :class:`BufferedRecorder` wrapping an :class:`HTTPRecorder`
     using the package defaults - the recommended way to construct a recorder.

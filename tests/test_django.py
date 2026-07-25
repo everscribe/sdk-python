@@ -5,8 +5,6 @@ MIDDLEWARE-list/URL-routing ceremony a real project would add."""
 
 from __future__ import annotations
 
-from typing import List
-
 import django
 from django.conf import settings
 
@@ -14,18 +12,18 @@ if not settings.configured:
     settings.configure(DEBUG=True, ALLOWED_HOSTS=["testserver"], USE_TZ=True)
     django.setup()
 
-from django.http import HttpResponse  # noqa: E402
-from django.test import RequestFactory  # noqa: E402
+from django.http import HttpResponse
+from django.test import RequestFactory
 
-from everscribe.django import ActorResolver, EverscribeMiddleware, event_from_request  # noqa: E402
-from everscribe.event import Actor, Event, current_event  # noqa: E402
+from everscribe.django import ActorResolver, EverscribeMiddleware, event_from_request
+from everscribe.event import Actor, Event, current_event
 
 rf = RequestFactory()
 
 
 class FakeRecorder:
     def __init__(self) -> None:
-        self.events: List[Event] = []
+        self.events: list[Event] = []
 
     def record(self, e: Event) -> None:
         self.events.append(e)

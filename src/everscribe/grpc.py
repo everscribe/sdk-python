@@ -79,8 +79,9 @@ Requires grpcio (``pip install "everscribe[grpc]"``).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 try:
     import grpc
@@ -116,7 +117,7 @@ class GrpcCallInfo:
     method: str
     #: Incoming call metadata, as a plain string mapping (binary (``-bin``)
     #: values are dropped - see :func:`_metadata_to_dict`).
-    metadata: "dict[str, str]"
+    metadata: dict[str, str]
     #: Remote peer address, when known (empty for transports with no
     #: meaningful client IP, e.g. a Unix domain socket).
     peer: str
@@ -135,7 +136,7 @@ _ANONYMOUS = Actor(type="anonymous")
 # status space), so no reinterpretation was needed. OK, UNKNOWN, INTERNAL,
 # and DATA_LOSS are handled by http_status_for_grpc_code's explicit/default
 # branches rather than listed here.
-_HTTP_STATUS_FOR_GRPC_CODE: "dict[Any, int]" = {
+_HTTP_STATUS_FOR_GRPC_CODE: dict[Any, int] = {
     grpc.StatusCode.CANCELLED: 499,  # nginx's client-closed-request; no stdlib constant
     grpc.StatusCode.INVALID_ARGUMENT: 400,
     grpc.StatusCode.FAILED_PRECONDITION: 400,
@@ -167,7 +168,7 @@ def http_status_for_grpc_code(code: Any) -> int:
     return _HTTP_STATUS_FOR_GRPC_CODE.get(code, 500)
 
 
-def result_from_grpc_status(code: Any, details: "str | None" = None) -> Result:
+def result_from_grpc_status(code: Any, details: str | None = None) -> Result:
     """Derives a :class:`Result` from a gRPC status code and an optional
     details string. Opt-in: core never calls this implicitly, the same
     contract as :func:`everscribe.event.result_from_http_status`.
@@ -184,7 +185,7 @@ def result_from_grpc_status(code: Any, details: "str | None" = None) -> Result:
     return result
 
 
-def _metadata_to_dict(metadata: Any) -> "dict[str, str]":
+def _metadata_to_dict(metadata: Any) -> dict[str, str]:
     """Converts gRPC invocation metadata (a sequence of key/value tuples,
     possibly with duplicate keys - last one wins) into the plain string
     mapping :func:`everscribe.event.origin_from_request` expects. Binary
@@ -212,7 +213,7 @@ def _peer_addr(peer: str) -> str:
     return ""
 
 
-def _result_from_context(context: Any, exc: "BaseException | None") -> Result:
+def _result_from_context(context: Any, exc: BaseException | None) -> Result:
     """Reads the final outcome off a ``ServicerContext`` after the wrapped
     handler has returned or raised.
 
@@ -261,13 +262,13 @@ class _GrpcOutcomeCapture:
     for that event, same as the HTTP adapters."""
 
     def __init__(self) -> None:
-        self._result: "Result | None" = None
+        self._result: Result | None = None
 
-    def finalize(self, context: Any, exc: "BaseException | None") -> None:
+    def finalize(self, context: Any, exc: BaseException | None) -> None:
         self._result = _result_from_context(context, exc)
 
     @property
-    def outcome(self) -> "Result | None":
+    def outcome(self) -> Result | None:
         return self._result
 
 
@@ -287,9 +288,9 @@ class EverscribeServerInterceptor(grpc.ServerInterceptor):
     def __init__(
         self,
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         self.recorder = recorder
         self.resolve_actor: ActorResolver = resolve_actor or (lambda info: _ANONYMOUS)
@@ -364,8 +365,7 @@ class EverscribeServerInterceptor(grpc.ServerInterceptor):
             with request_scope(template, capture) as current:
                 current.action = method
                 try:
-                    for message in inner(request, context):
-                        yield message
+                    yield from inner(request, context)
                 except Exception as exc:
                     capture.finalize(context, exc)
                     end_event(current, self.recorder, self.logger)
@@ -390,9 +390,9 @@ class EverscribeAsyncServerInterceptor(grpc_aio.ServerInterceptor):
     def __init__(
         self,
         *,
-        recorder: "Recorder | None" = None,
-        resolve_actor: "ActorResolver | None" = None,
-        logger: "Logger | None" = None,
+        recorder: Recorder | None = None,
+        resolve_actor: ActorResolver | None = None,
+        logger: Logger | None = None,
     ) -> None:
         self.recorder = recorder
         self.resolve_actor: ActorResolver = resolve_actor or (lambda info: _ANONYMOUS)
@@ -468,11 +468,11 @@ class EverscribeAsyncServerInterceptor(grpc_aio.ServerInterceptor):
 
 
 __all__ = [
-    "EverscribeServerInterceptor",
-    "EverscribeAsyncServerInterceptor",
     "ActorResolver",
+    "EverscribeAsyncServerInterceptor",
+    "EverscribeServerInterceptor",
     "GrpcCallInfo",
     "current_event",
-    "result_from_grpc_status",
     "http_status_for_grpc_code",
+    "result_from_grpc_status",
 ]

@@ -26,10 +26,11 @@ works unchanged under both sync (WSGI) and async (ASGI) servers.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import Callable, Iterator, Protocol, TypeVar, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
 from .event import Event, _new_id, _now_utc
 from .types import Logger, OutcomeCapture, Result
@@ -72,14 +73,14 @@ class _RequestState:
 @dataclass
 class _EventContext:
     template: Event
-    capture: "OutcomeCapture | None" = None
+    capture: OutcomeCapture | None = None
     #: Present only when installed via :func:`request_scope`. :func:`event_scope`
     #: / :func:`run_with_event` callers get template/capture only -
     #: :func:`current_event` and the dedupe mark are no-ops in that scope.
-    state: "_RequestState | None" = None
+    state: _RequestState | None = None
 
 
-_event_context: ContextVar["_EventContext | None"] = ContextVar(
+_event_context: ContextVar[_EventContext | None] = ContextVar(
     "everscribe_event_context", default=None
 )
 
@@ -129,7 +130,7 @@ def current_event() -> Event:
 
 @contextmanager
 def event_scope(
-    template: Event, capture: "OutcomeCapture | None" = None
+    template: Event, capture: OutcomeCapture | None = None
 ) -> Iterator[None]:
     """Context manager that installs ``template`` and ``capture`` for the
     duration of the block, with no request-scoped current event or dedupe
@@ -152,7 +153,7 @@ def event_scope(
 
 
 def run_with_event(
-    template: Event, capture: "OutcomeCapture | None", fn: Callable[[], T]
+    template: Event, capture: OutcomeCapture | None, fn: Callable[[], T]
 ) -> T:
     """Run ``fn`` with ``template`` and ``capture`` installed in scope, and
     return its result. Async adapters generally prefer
@@ -163,7 +164,7 @@ def run_with_event(
 
 @contextmanager
 def request_scope(
-    template: Event, capture: "OutcomeCapture | None" = None
+    template: Event, capture: OutcomeCapture | None = None
 ) -> Iterator[Event]:
     """Install ``template`` and ``capture`` for the duration of the block,
     plus a request-scoped current event that :func:`current_event` returns
@@ -231,7 +232,7 @@ def prepare_event(e: Event) -> None:
 
 
 def end_event(
-    e: Event, recorder: "Recorder | None", logger: "Logger | None" = None
+    e: Event, recorder: Recorder | None, logger: Logger | None = None
 ) -> None:
     """Record ``e`` once, if ``recorder`` is configured and the handler
     named it (non-empty ``action``). Call exactly once, after the handler
@@ -259,7 +260,7 @@ def end_event(
     _apply_outcome(e, final=True)
     try:
         recorder.record(e)
-    except Exception as err:  # audit failure must not break the caller
+    except Exception as err:  # noqa: BLE001 -- audit failure must not break the caller
         if logger is not None:
             logger.error("everscribe: auto-record failed: %s", err)
 
@@ -351,12 +352,12 @@ def result_from_http_status(code: int) -> Result:
 
 
 __all__ = [
-    "new_from_context",
     "current_event",
-    "run_with_event",
-    "event_scope",
-    "request_scope",
-    "prepare_event",
     "end_event",
+    "event_scope",
+    "new_from_context",
+    "prepare_event",
+    "request_scope",
     "result_from_http_status",
+    "run_with_event",
 ]

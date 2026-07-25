@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from concurrent import futures
-from typing import Any, Dict, List
+from typing import Any
 
 import grpc
 import pytest
@@ -28,7 +28,7 @@ from everscribe.grpc import (
 
 class FakeRecorder:
     def __init__(self) -> None:
-        self.events: List[Event] = []
+        self.events: list[Event] = []
         self.lock = threading.Lock()
 
     def record(self, e: Event) -> None:
@@ -45,7 +45,7 @@ def _identity(x: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def _sync_handlers(diagnostics: "Dict[str, Any]") -> "dict[str, Any]":
+def _sync_handlers(diagnostics: dict[str, Any]) -> dict[str, Any]:
     def ping(request: bytes, context: Any) -> bytes:
         return request
 
@@ -74,8 +74,7 @@ def _sync_handlers(diagnostics: "Dict[str, Any]") -> "dict[str, Any]":
         return b",".join(request_iterator)
 
     def echo_bidi(request_iterator: Any, context: Any) -> Any:
-        for req in request_iterator:
-            yield req
+        yield from request_iterator
 
     return {
         "Ping": grpc.unary_unary_rpc_method_handler(
@@ -106,9 +105,9 @@ def _sync_handlers(diagnostics: "Dict[str, Any]") -> "dict[str, Any]":
 
 
 class SyncServer:
-    def __init__(self, recorder: "FakeRecorder | None" = None, resolve_actor: Any = None) -> None:
+    def __init__(self, recorder: FakeRecorder | None = None, resolve_actor: Any = None) -> None:
         self.recorder = recorder
-        self.diagnostics: "Dict[str, Any]" = {}
+        self.diagnostics: dict[str, Any] = {}
         interceptor = EverscribeServerInterceptor(recorder=recorder, resolve_actor=resolve_actor)
         self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=8), interceptors=[interceptor])
         handlers = _sync_handlers(self.diagnostics)
@@ -145,9 +144,9 @@ class SyncServer:
 
 @pytest.fixture
 def sync_server():  # type: ignore[no-untyped-def]
-    servers: "List[SyncServer]" = []
+    servers: list[SyncServer] = []
 
-    def make(recorder: "FakeRecorder | None" = None, resolve_actor: Any = None) -> SyncServer:
+    def make(recorder: FakeRecorder | None = None, resolve_actor: Any = None) -> SyncServer:
         s = SyncServer(recorder=recorder, resolve_actor=resolve_actor)
         servers.append(s)
         return s
@@ -228,7 +227,7 @@ def test_sync_unhandled_exception_records_as_error(sync_server) -> None:  # type
 
 def test_sync_resolver_receives_call_info(sync_server) -> None:  # type: ignore[no-untyped-def]
     rec = FakeRecorder()
-    seen: "list[GrpcCallInfo]" = []
+    seen: list[GrpcCallInfo] = []
 
     def resolver(info: GrpcCallInfo) -> Actor:
         seen.append(info)
@@ -288,7 +287,7 @@ def test_sync_concurrent_rpcs_do_not_cross_talk(sync_server) -> None:  # type: i
 # ---------------------------------------------------------------------------
 
 
-def _async_handlers(diagnostics: "Dict[str, Any]") -> "dict[str, Any]":
+def _async_handlers(diagnostics: dict[str, Any]) -> dict[str, Any]:
     async def ping(request: bytes, context: Any) -> bytes:
         return request
 
@@ -351,12 +350,12 @@ def _async_handlers(diagnostics: "Dict[str, Any]") -> "dict[str, Any]":
 
 class AsyncServer:
     def __init__(self) -> None:
-        self.diagnostics: "Dict[str, Any]" = {}
+        self.diagnostics: dict[str, Any] = {}
         self.server: Any = None
         self.channel: Any = None
         self.port = 0
 
-    async def start(self, recorder: "FakeRecorder | None" = None, resolve_actor: Any = None) -> None:
+    async def start(self, recorder: FakeRecorder | None = None, resolve_actor: Any = None) -> None:
         interceptor = EverscribeAsyncServerInterceptor(recorder=recorder, resolve_actor=resolve_actor)
         self.server = grpc_aio.server(interceptors=[interceptor])
         handlers = _async_handlers(self.diagnostics)

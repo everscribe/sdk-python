@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Sequence, runtime_checkable
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from ..event import Event
 
@@ -29,4 +30,4 @@ class BatchRecorder(Protocol):
     def record_batch(self, events: Sequence[Event]) -> None: ...
 
 
-__all__ = ["Recorder", "BatchRecorder"]
+__all__ = ["BatchRecorder", "Recorder"]

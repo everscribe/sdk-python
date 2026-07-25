@@ -104,7 +104,7 @@ def test_wire_occurred_at_z_suffix_and_microseconds() -> None:
 
 def test_wire_naive_datetime_assumed_utc() -> None:
     e = _fixed(Event("x"))
-    e.occurred_at = datetime(2026, 7, 1, 12, 0, 0)  # naive
+    e.occurred_at = datetime(2026, 7, 1, 12, 0, 0)  # noqa: DTZ001 -- naive input is the case under test
     assert event_to_wire(e)["occurred_at"] == "2026-07-01T12:00:00Z"
 
 
