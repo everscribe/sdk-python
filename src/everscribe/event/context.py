@@ -170,25 +170,15 @@ def request_scope(
     plus a request-scoped current event that :func:`current_event` returns
     and :func:`end_event` auto-records. Yields that current event.
 
-    The current event is a clone of ``template`` (so ``template`` itself
-    stays unstamped - see :func:`new_from_context`), stamped here with
-    ``idempotency_key = id``, unconditionally, before the block runs. Both
-    the auto-record path (:func:`end_event`) and a handler's own manual
-    record of this same event must submit that key so the server's
-    duplicate-absorbing constraint collapses a retried submission instead of
-    colliding on the events primary key. Stamping later (inside
-    :func:`end_event`) would key only the second submission, which dedupes
-    nothing. Stamping ``template`` instead would be worse:
-    :func:`new_from_context` clones it for every mid-handler event, so a
-    handler emitting several events would have them all share one key and
-    the server would silently discard all but the first. A handler that
-    sets its own ``idempotency_key`` on the current event simply overwrites
-    this default, since the handler runs after this stamp.
+    The current event is a clone of ``template``, so ``template`` itself stays
+    unstamped (see :func:`new_from_context`). The clone is stamped with
+    ``idempotency_key = id`` before the block runs, so both the auto-record
+    path and a handler's own manual record of that same event submit the key
+    and the server collapses a retried submission instead of colliding on the
+    events primary key. A handler setting its own key overwrites this default.
 
-    Framework adapters (ASGI today; Flask/Django/gRPC later) use this
-    instead of the lower-level :func:`event_scope` when they want
-    auto-record support: :func:`current_event`, dedupe via the shared
-    ``recorded`` flag, and :func:`end_event`.
+    Adapters use this instead of the lower-level :func:`event_scope` when they
+    want auto-record support.
     """
     current = _clone_template(template)
     current.idempotency_key = current.id
@@ -208,18 +198,14 @@ def prepare_event(e: Event) -> None:
     ``result.status`` is unset. Recorder implementations call this on each
     event before persisting so handlers can rely on auto-populated fields.
 
-    Result population here is never final: ``prepare_event`` can run
-    mid-handler, when a handler records an extra event before the response
-    is written. At that moment the capture legitimately reports no outcome
-    yet - that does not mean no outcome ever - so unlike :func:`end_event`,
-    this leaves ``result`` untouched rather than stamping the "no response
-    written" sentinel. Only :func:`end_event` runs after the handler has
-    genuinely finished and may apply that sentinel.
+    Result population here is never final: this can run mid-handler, where the
+    capture legitimately reports no outcome yet, so it leaves ``result``
+    untouched rather than stamping the "no response written" sentinel. Only
+    :func:`end_event` applies that.
 
-    Also has a dedupe side effect, not obvious from the name: when ``e`` is
-    the request-scoped event installed by :func:`request_scope` (checked by
-    identity, not by id), this marks it recorded so :func:`end_event`'s
-    auto-record backstop does not submit it a second time.
+    Side effect, not obvious from the name: when ``e`` is the request-scoped
+    event installed by :func:`request_scope` (checked by identity, not by id),
+    this marks it recorded so :func:`end_event` does not submit it twice.
     """
     if not e.id:
         e.id = _new_id()

@@ -1,77 +1,28 @@
 """gRPC server interceptors for grpcio (sync and async).
 
-This adapter supplies only gRPC-specific transport bindings; the record
-lifecycle itself (the request-scoped current event, dedupe, idempotency-key
-stamping, and the final-outcome rule) lives in :mod:`everscribe.event` so
-this adapter stays as thin as :mod:`everscribe.asgi` / :mod:`everscribe.flask`
-/ :mod:`everscribe.django`.
+Transport bindings only; the record lifecycle (the request-scoped current
+event, dedupe, idempotency-key stamping, and the final-outcome rule) lives in
+:mod:`everscribe.event`.
 
-Two classes, because grpcio's sync and async servers are not interchangeable:
-:class:`EverscribeServerInterceptor` extends ``grpc.ServerInterceptor`` for a
-``grpc.server()``; :class:`EverscribeAsyncServerInterceptor` extends
-``grpc.aio.ServerInterceptor`` for a ``grpc.aio.server()``. This split is
-grpcio's design, not a choice made here.
+Pick the class matching your server, since grpcio's sync and async servers are
+not interchangeable: :class:`EverscribeServerInterceptor` for a
+``grpc.server()``, :class:`EverscribeAsyncServerInterceptor` for a
+``grpc.aio.server()``. All four RPC shapes are supported: unary_unary,
+unary_stream, stream_unary, and stream_stream.
 
-grpcio's ``intercept_service(continuation, handler_call_details)`` is a known
-wart: it intercepts at handler *resolution*, not per call - ``continuation``
-returns an ``RpcMethodHandler`` bundling one of four business-logic callables
-(``unary_unary``, ``unary_stream``, ``stream_unary``, ``stream_stream``,
-exactly one non-``None`` depending on the method's request/response streaming
-shape) plus the request/response (de)serializers. To observe an outcome, this
-module unwraps that handler, rebuilds a new one whose inner callable installs
-the lifecycle around a call into the original, and passes the original
-(de)serializers through unchanged - dropping either one would break the RPC's
-wire format.
+Two behaviours differ from the HTTP adapters and change how you query:
 
-``action`` defaults to the full RPC method name (e.g.
-``/everscribe.v1.Ingest/Record``), so every RPC records unless a handler
-clears it - deliberately different from the HTTP adapters (ASGI/Flask/
-Django), which record nothing until a handler names the event. There is no
-equivalent of an HTTP router path that is meaningful without a handler-chosen
-action: the RPC method name already *is* the action a gRPC service was built
-around. ``sdk-go``'s ``UnaryInterceptor`` and ``sdk-node``'s
-``grpcServerInterceptor`` both default the same way. The default is stamped
-on the request-scoped event (:func:`everscribe.event.current_event`'s
-return value), never on the template passed into :func:`everscribe.event.request_scope`:
-stamping the template would leak the method name into every
-:func:`everscribe.event.new_from_context` clone a handler makes, so a
-secondary event the handler never named would inherit the RPC method name
-instead of being dropped by the empty-action no-op every stock recorder
-applies - a real bug caught in ``sdk-go``'s review before it shipped there.
+- ``action`` defaults to the full RPC method name (e.g.
+  ``/everscribe.v1.Ingest/Record``), so every RPC records unless a handler
+  clears it. The HTTP adapters record nothing until a handler names the event.
+- ``Result.code`` carries the canonical HTTP equivalent of the gRPC status via
+  :func:`http_status_for_grpc_code`, never the native gRPC code, because gRPC's
+  ``OK`` is 0 and every wire encoder drops a zero code as empty.
 
-``Result.code`` always carries the canonical HTTP equivalent of the gRPC
-status, via :func:`http_status_for_grpc_code` (ported case for case from
-``sdk-go``'s ``HTTPStatusFor``, ``pkg/event/adapter_codes.go``), never the
-native gRPC code: gRPC's ``OK`` is code 0, which every SDK's wire encoder
-drops as empty, so a native code would make successful RPCs unmatchable by a
-``result.code`` query.
-
-## Arity scope
-
-Supports all four RPC shapes: unary_unary, unary_stream (server streaming),
-stream_unary (client streaming), and stream_stream (bidi streaming). This is
-broader than ``sdk-go``/``sdk-rust`` (unary plus server-streaming only) and
-``sdk-node`` (unary only) - both of those are bounded by their own runtime's
-hook timing (grpc-js, for example, invokes the handler from a hook this
-interceptor never gets to wrap, for client-streaming and bidi calls), not by
-anything inherent to gRPC itself. grpcio's model is structurally different:
-because ``intercept_service`` replaces the handler's own callable rather than
-hooking a fixed lifecycle point, every arity gets wrapped the same way.
-
-The one real risk for a streaming arity is whether the ``contextvars``-based
-lifecycle (:func:`everscribe.event.request_scope`) survives a handler
-resumption on a different thread (sync) or a different asyncio Task (async):
-if grpcio ever drove a single call's generator/async-generator from more than
-one thread or Task, ``current_event()`` could silently return a throwaway
-event mid-stream instead of the call's real one. This was verified directly,
-not assumed: concurrent, artificially-interleaved unary_stream/stream_unary/
-stream_stream calls against a real ``grpc.server()`` and a real
-``grpc.aio.server()`` over a real socket confirmed a single call is always
-driven by exactly one worker thread (sync) or one Task (async) for its entire
-lifetime, so the ``contextvar`` set when the call begins stays visible on
-every subsequent yield/iteration. This relies on grpcio's current internal
-execution model rather than a documented public guarantee; see the
-adapters report for the spike that established it.
+Streaming caveat: the ``contextvars`` lifecycle assumes one call is driven by a
+single worker thread (sync) or a single asyncio Task (async) for its whole
+lifetime. That holds in grpcio today and the streaming tests cover it, but it
+rests on grpcio's execution model rather than a documented guarantee.
 
 Requires grpcio (``pip install "everscribe[grpc]"``).
 """
