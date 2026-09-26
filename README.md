@@ -7,7 +7,7 @@
 </p>
 
 <p>
-  <a href="https://pypi.org/project/everscribe/"><img src="https://img.shields.io/pypi/v/everscribe.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/everscribe/"><img src="https://img.shields.io/pypi/v/everscribe" alt="PyPI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
