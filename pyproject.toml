@@ -2,9 +2,14 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Single version literal: src/everscribe/__init__.py exports __version__ in
+# __all__, so a second copy here would drift and ship a wrong number.
+[tool.hatch.version]
+path = "src/everscribe/__init__.py"
+
 [project]
 name = "everscribe"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Python SDK for the Everscribe audit-log API"
 readme = "README.md"
 requires-python = ">=3.10"
