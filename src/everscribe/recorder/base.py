@@ -25,9 +25,10 @@ class BatchRecorder(Protocol):
     """Optional capability for implementations that can persist multiple
     events more efficiently than N serial :meth:`Recorder.record` calls.
     :class:`BufferedRecorder` uses it when available and falls back to looped
-    ``record`` calls otherwise."""
+    ``record`` calls otherwise. ``timeout`` is the per-attempt flush timeout
+    in seconds; implementations without the parameter are called without it."""
 
-    def record_batch(self, events: Sequence[Event]) -> None: ...
+    def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None: ...
 
 
 __all__ = ["BatchRecorder", "Recorder"]

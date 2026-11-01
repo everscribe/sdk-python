@@ -38,6 +38,7 @@ Transport = Callable[
 ]
 
 _MAX_ERROR_BODY = 4096
+_MAX_RETRY_AFTER_DIGITS = 10
 
 
 def _urllib_transport(
@@ -58,8 +59,20 @@ def _retry_after(headers: Mapping[str, str]) -> float:
     for k, v in headers.items():
         if k.lower() == "retry-after":
             v = v.strip()
-            return float(int(v)) if v.isascii() and v.isdigit() and int(v) > 0 else 0.0
+            if len(v) > _MAX_RETRY_AFTER_DIGITS or not (v.isascii() and v.isdigit()):
+                return 0.0
+            try:
+                return float(max(int(v), 0))
+            except (ValueError, OverflowError):
+                return 0.0
     return 0.0
+
+
+def _read_error_body(e: urllib.error.HTTPError) -> bytes:
+    try:
+        return e.read(_MAX_ERROR_BODY) or b""
+    except Exception:  # noqa: BLE001 -- the status matters more than the body
+        return b""
 
 
 def _dumps(obj: object) -> bytes:
@@ -138,6 +151,8 @@ class HTTPRecorder:
         t = timeout if timeout is not None else self._request_timeout
         try:
             res = self._transport(self.base_url + path, body, headers, t)
+        except urllib.error.HTTPError as e:  # an OSError; keep the status
+            res = (e.code, _read_error_body(e), dict(e.headers.items()) if e.headers else {})
         except (OSError, http.client.HTTPException) as e:
             raise NetworkError(f"recorder: {e}") from e
         status, resp_body = res[0], res[1]

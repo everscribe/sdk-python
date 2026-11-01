@@ -81,3 +81,12 @@ def test_retry_wait() -> None:
     e.retry_after = 3600.0
     assert retry_wait(3, e, 0.5, 30.0, ident) == 30.0
     assert retry_wait(3, NetworkError("x"), 0.5, 30.0, ident) == 2.0
+
+
+class _RaisingTransient(Exception):
+    def transient(self) -> bool:
+        raise RuntimeError("bug")
+
+
+def test_raising_transient_is_not_retryable() -> None:
+    assert is_retryable(_RaisingTransient()) is False

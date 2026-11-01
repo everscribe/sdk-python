@@ -13,10 +13,11 @@ def is_retryable(err: BaseException) -> bool:
         return err.transient()
     if isinstance(err, NetworkError | TimeoutError):
         return True
-    t = getattr(err, "transient", None)
-    if callable(t):
-        return bool(t())
-    return bool(t)
+    try:
+        t = getattr(err, "transient", None)
+        return bool(t()) if callable(t) else bool(t)
+    except Exception:  # noqa: BLE001 -- a broken transient() means not retryable
+        return False
 
 
 def is_splittable(err: BaseException) -> bool:

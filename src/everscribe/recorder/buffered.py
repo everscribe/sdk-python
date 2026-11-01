@@ -11,6 +11,7 @@ on the worker thread.
 from __future__ import annotations
 
 import copy
+import inspect
 import logging
 import threading
 import time
@@ -31,6 +32,31 @@ DEFAULT_FLUSH_SIZE = 100
 DEFAULT_FLUSH_INTERVAL = 5.0
 DEFAULT_FLUSH_TIMEOUT = 30.0
 DEFAULT_DRAIN_TIMEOUT = 30.0
+DEFAULT_INITIAL_BACKOFF = 0.5
+DEFAULT_MAX_BACKOFF = 30.0
+DEFAULT_MAX_RETRY_DURATION = 300.0
+
+# Durations are clamped here so clock arithmetic and waits never overflow.
+_MAX_DURATION = 30 * 365 * 24 * 3600.0
+
+
+def _duration(v: float | None, default: float) -> float:
+    """Seconds; None, <= 0, or NaN use ``default``, huge values are clamped."""
+    if v is None or not v > 0:
+        return default
+    return float(min(v, _MAX_DURATION))
+
+
+def _accepts_timeout(fn: Callable[..., None]) -> bool:
+    """Whether ``fn`` takes a ``timeout`` keyword (or ``**kwargs``)."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        p.kind is p.VAR_KEYWORD or (p.name == "timeout" and p.kind is not p.POSITIONAL_ONLY)
+        for p in params
+    )
 
 
 class OverflowPolicy(str, Enum):
@@ -82,11 +108,19 @@ class BufferedRecorder:
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
         logger: Logger | None = None,
         on_drop: OnDrop | None = None,
+        initial_backoff: float | None = None,
+        max_backoff: float | None = None,
+        max_retry_duration: float | None = None,
     ) -> None:
         """``on_drop`` is called with (events, reason, err) when events are
         dropped. It must not block, must not call ``record``, ``flush``, or
         ``close`` on this recorder, and may be called concurrently from
-        request threads and the worker."""
+        request threads and the worker.
+
+        A failed batch is retried with jittered backoff starting at
+        ``initial_backoff`` seconds (default 0.5), capped at ``max_backoff``
+        (default 30), for up to ``max_retry_duration`` (default 300). None or
+        <= 0 uses the default."""
         self._inner = inner
         self._buffer_size = buffer_size
         self._flush_size = flush_size
@@ -94,6 +128,9 @@ class BufferedRecorder:
         self._flush_timeout = flush_timeout
         self._overflow = OverflowPolicy(overflow)
         self._drain_timeout = drain_timeout
+        self._initial_backoff = _duration(initial_backoff, DEFAULT_INITIAL_BACKOFF)
+        self._max_backoff = _duration(max_backoff, DEFAULT_MAX_BACKOFF)
+        self._max_retry_duration = _duration(max_retry_duration, DEFAULT_MAX_RETRY_DURATION)
         self._logger: Logger = logger or logging.getLogger("everscribe.recorder")
 
         self._cond = threading.Condition()
@@ -109,6 +146,7 @@ class BufferedRecorder:
         # Detect the optional batch capability once.
         rb = getattr(inner, "record_batch", None)
         self._record_batch: Callable[..., None] | None = rb if callable(rb) else None
+        self._batch_timeout = rb is not None and _accepts_timeout(rb)
 
         self._next_flush = time.monotonic() + flush_interval
         self._thread = threading.Thread(target=self._run, name="everscribe-recorder", daemon=True)
@@ -270,8 +308,10 @@ class BufferedRecorder:
             return None
         err: BaseException | None = None
         try:
-            if self._record_batch is not None:
+            if self._record_batch is not None and self._batch_timeout:
                 self._record_batch(batch, timeout=self._flush_timeout)
+            elif self._record_batch is not None:
+                self._record_batch(batch)
             else:
                 # Serial fallback for inner recorders without record_batch;
                 # the Recorder protocol has no timeout param, so we don't pass
@@ -305,6 +345,9 @@ __all__ = [
     "DEFAULT_FLUSH_INTERVAL",
     "DEFAULT_FLUSH_SIZE",
     "DEFAULT_FLUSH_TIMEOUT",
+    "DEFAULT_INITIAL_BACKOFF",
+    "DEFAULT_MAX_BACKOFF",
+    "DEFAULT_MAX_RETRY_DURATION",
     "BufferedRecorder",
     "BufferedStats",
     "OverflowPolicy",

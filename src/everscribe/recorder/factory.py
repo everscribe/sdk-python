@@ -34,6 +34,9 @@ def new(
     drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
     logger: Logger | None = None,
     on_drop: OnDrop | None = None,
+    initial_backoff: float | None = None,
+    max_backoff: float | None = None,
+    max_retry_duration: float | None = None,
 ) -> BufferedRecorder:
     """Return a :class:`BufferedRecorder` wrapping an :class:`HTTPRecorder`
     using the package defaults - the recommended way to construct a recorder.
@@ -61,6 +64,9 @@ def new(
         drain_timeout=drain_timeout,
         logger=logger,
         on_drop=on_drop,
+        initial_backoff=initial_backoff,
+        max_backoff=max_backoff,
+        max_retry_duration=max_retry_duration,
     )
 
 

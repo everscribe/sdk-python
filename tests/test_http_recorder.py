@@ -289,3 +289,34 @@ def test_circular_metadata_is_encode_error() -> None:
     with pytest.raises(EncodeError):
         r.record(Event("a", metadata=loop))
     assert t.calls == []
+
+
+@pytest.mark.parametrize(
+    "value", ["9" * 5000, "9" * 400, "9" * 20], ids=["5000-digits", "400-digits", "20-digits"]
+)
+def test_retry_after_absurd_value_is_zero(value: str) -> None:
+    t = _HeaderTransport(503, {"Retry-After": value})
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(HTTPError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.retry_after == 0.0
+
+
+def test_transport_urllib_http_error_becomes_http_error() -> None:
+    import email.message
+    import io
+    import urllib.error
+
+    hdrs = email.message.Message()
+    hdrs["Retry-After"] = "4"
+
+    def t(url: str, body: bytes, headers: Mapping[str, str], timeout: float):
+        raise urllib.error.HTTPError(url, 503, "busy", hdrs, io.BytesIO(b"down"))
+
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(HTTPError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.status_code == 503
+    assert ei.value.body == "down"
+    assert ei.value.retry_after == 4.0
+    assert ei.value.transient() is True
