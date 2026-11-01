@@ -179,12 +179,14 @@ def test_close_is_idempotent() -> None:
     r.close()  # no raise
 
 
-def test_record_after_close_is_noop() -> None:
+def test_record_after_close_reports_closed_once() -> None:
     inner = FakeInner()
-    r = BufferedRecorder(inner, **_QUIET)
+    seen: list[DropReason] = []
+    r = BufferedRecorder(inner, on_drop=lambda _e, reason, _x: seen.append(reason), **_QUIET)
     r.close()
     r.record(Event("a"))
     assert inner.all_events() == []
+    assert seen == [DropReason.CLOSED]
 
 
 def test_flush_after_close_is_noop() -> None:
@@ -321,9 +323,13 @@ def test_close_drain_timeout_raises() -> None:
     inner.block = threading.Event()  # record_batch will hang
     r = BufferedRecorder(inner, drain_timeout=0.1, **_QUIET)
     r.record(Event("a"))
-    with pytest.raises(DrainTimeoutError):
-        r.close()
-    inner.block.set()  # let the worker finish so the thread can exit
+    start = time.monotonic()
+    try:
+        with pytest.raises(DrainTimeoutError):
+            r.close()
+        assert time.monotonic() - start < 0.1 + 1.5
+    finally:
+        inner.block.set()  # let the worker finish so the thread can exit
 
 
 def _actions(inner: FakeInner) -> list[str]:
@@ -361,14 +367,15 @@ def test_flush_sends_batches_of_flush_size() -> None:
 
 def test_full_batch_now_rest_on_interval() -> None:
     inner = GatedInner(permits=100)
-    r = BufferedRecorder(inner, flush_size=100, flush_interval=0.4)
+    r = BufferedRecorder(inner, flush_size=100, flush_interval=1.5)
     try:
+        start = time.monotonic()
         for i in range(150):
             r.record(Event(f"e{i}"))
-        assert wait_until(lambda: inner.sizes() == [100], timeout=0.3)
-        time.sleep(0.05)
-        assert inner.sizes() == [100]
-        assert wait_until(lambda: inner.sizes() == [100, 50])
+        assert wait_until(lambda: inner.sizes() == [100], timeout=1.0)
+        assert r.stats().pending == 50  # the rest waits for the interval
+        assert wait_until(lambda: inner.sizes() == [100, 50], timeout=3.0)
+        assert time.monotonic() - start < 1.5 + 1.0
     finally:
         r.close()
 
@@ -496,14 +503,14 @@ def test_small_buffer_large_flush_size_block_delivers_without_interval() -> None
 
 def test_interval_during_long_send_sends_right_after() -> None:
     inner = GatedInner()
-    r = BufferedRecorder(inner, flush_size=10_000, flush_interval=0.3)
+    r = BufferedRecorder(inner, flush_size=10_000, flush_interval=1.0)
     try:
         r.record(Event("a"))
         assert wait_until(lambda: inner.calls == 1)  # [a] in flight
         r.record(Event("b"))
-        time.sleep(0.5)  # the next interval elapses mid-send
+        time.sleep(1.2)  # the next interval elapses mid-send
         inner.gate.release(2)
-        assert wait_until(lambda: _actions(inner) == ["a", "b"], timeout=0.15)
+        assert wait_until(lambda: _actions(inner) == ["a", "b"], timeout=0.5)
     finally:
         inner.gate.release(10)
         r.close()
@@ -521,4 +528,296 @@ def test_flush_timeout_during_slow_send_still_delivers() -> None:
         assert r.stats().dropped_by_reason.shutdown == 0
     finally:
         inner.gate.release(10)
+        r.close()
+
+
+# -- close: drain, shutdown and closed reports --------------------------------
+
+
+class HungInner(FakeInner):
+    """record_batch blocks until ``release`` is set, then succeeds or raises
+    ``after``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        self.after: BaseException | None = None
+
+    def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
+        self.entered.set()
+        assert self.release.wait(30)
+        if self.after is not None:
+            raise self.after
+        with self.lock:
+            self.batches.append(list(events))
+
+
+Drops = list[tuple[list[str], DropReason]]
+
+
+def _collect(drops: Drops) -> Callable[[list[Event], DropReason, BaseException | None], None]:
+    lock = threading.Lock()
+
+    def cb(evs: list[Event], reason: DropReason, _x: BaseException | None) -> None:
+        with lock:
+            drops.append(([e.action for e in evs], reason))
+
+    return cb
+
+
+@pytest.mark.parametrize("after", [None, NetworkError("down")])
+def test_close_hung_inner_reports_queued_then_in_flight_once(
+    after: BaseException | None,
+) -> None:
+    inner = HungInner()
+    inner.after = after
+    drops: Drops = []
+    r = BufferedRecorder(
+        inner, flush_size=2, flush_interval=3600.0, drain_timeout=0.2, on_drop=_collect(drops)
+    )
+    try:
+        r.record(Event("a"))
+        r.record(Event("b"))  # [a, b] goes in flight and hangs
+        assert inner.entered.wait(2)
+        r.record(Event("c"))
+        start = time.monotonic()
+        with pytest.raises(DrainTimeoutError):
+            r.close()
+        assert time.monotonic() - start < 0.2 + 1.5
+        assert drops == [(["c"], DropReason.SHUTDOWN)]  # queued only, before close returned
+    finally:
+        inner.release.set()
+    if after is None:
+        assert wait_until(lambda: _actions(inner) == ["a", "b"])
+        time.sleep(0.05)
+        assert drops == [(["c"], DropReason.SHUTDOWN)]
+    else:
+        assert wait_until(lambda: len(drops) == 2)
+        assert drops == [(["c"], DropReason.SHUTDOWN), (["a", "b"], DropReason.SHUTDOWN)]
+        assert _actions(inner) == []
+    assert wait_until(lambda: not r._thread.is_alive())
+    assert r.stats().pending == 0
+
+
+def test_record_concurrent_with_close_every_event_resolved_once() -> None:
+    for _ in range(5):
+        inner = FakeInner()
+        drops: Drops = []
+        r = BufferedRecorder(inner, buffer_size=50, flush_size=10, on_drop=_collect(drops))
+        go = threading.Event()
+
+        def produce(t: int, rec: BufferedRecorder = r, start: threading.Event = go) -> None:
+            start.wait()
+            for i in range(300):
+                rec.record(Event(f"t{t}-{i}"))
+
+        threads = [threading.Thread(target=produce, args=(t,)) for t in range(8)]
+        for th in threads:
+            th.start()
+        go.set()
+        time.sleep(0.002)
+        r.close()
+        for th in threads:
+            th.join(5)
+        seen = _actions(inner) + [a for evs, _ in drops for a in evs]
+        want = [f"t{t}-{i}" for t in range(8) for i in range(300)]
+        assert sorted(seen) == sorted(want)
+        assert {reason for _, reason in drops} <= {DropReason.BUFFER_FULL, DropReason.CLOSED}
+
+
+def _close_in_thread(r: BufferedRecorder) -> tuple[threading.Thread, list[object]]:
+    out: list[object] = []
+
+    def run() -> None:
+        try:
+            r.close()
+            out.append(None)
+        except DrainTimeoutError as ex:
+            out.append(ex)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t, out
+
+
+def test_concurrent_close_waits_for_first_drain() -> None:
+    inner = GatedInner()
+    r = BufferedRecorder(inner, **_QUIET)
+    r.record(Event("a"))
+    r.record(Event("b"))
+    first, out1 = _close_in_thread(r)
+    assert wait_until(lambda: inner.calls == 1)  # drain in flight
+    second, out2 = _close_in_thread(r)
+    second.join(0.2)
+    assert second.is_alive()  # waits for the first
+    inner.gate.release()
+    first.join(2)
+    second.join(2)
+    assert not first.is_alive() and not second.is_alive()
+    assert out1 == out2 == [None]
+    assert _actions(inner) == ["a", "b"]
+
+
+def test_concurrent_close_shares_drain_timeout() -> None:
+    inner = HungInner()
+    r = BufferedRecorder(inner, drain_timeout=0.2, **_QUIET)
+    try:
+        r.record(Event("a"))
+        first, out1 = _close_in_thread(r)
+        assert inner.entered.wait(2)
+        second, out2 = _close_in_thread(r)
+        first.join(3)
+        second.join(3)
+        assert not first.is_alive() and not second.is_alive()
+        assert isinstance(out1[0], DrainTimeoutError)
+        assert isinstance(out2[0], DrainTimeoutError)
+        with pytest.raises(DrainTimeoutError):
+            r.close()  # later calls see the same outcome
+    finally:
+        inner.release.set()
+
+
+def test_on_drop_calling_close_from_worker_does_not_deadlock() -> None:
+    inner = GatedInner(permits=100)
+    inner.fails = 1
+    inner.err = HTTPError(400, "bad")
+    r: BufferedRecorder
+
+    def cb(_e: list[Event], _r: DropReason, _x: BaseException | None) -> None:
+        r.close()
+
+    r = BufferedRecorder(inner, on_drop=cb, **_QUIET)
+    r.record(Event("bad"))
+    r.flush(timeout=2)  # the reject calls close on the worker thread
+    t, out = _close_in_thread(r)
+    t.join(2)
+    assert not t.is_alive()
+    assert out == [None]
+
+
+def test_on_drop_calling_close_during_fallback_does_not_deadlock() -> None:
+    inner = HungInner()
+    r: BufferedRecorder
+    inner_errs: list[object] = []
+
+    def cb(_e: list[Event], _r: DropReason, _x: BaseException | None) -> None:
+        try:
+            r.close()
+        except DrainTimeoutError as ex:
+            inner_errs.append(ex)
+
+    r = BufferedRecorder(inner, flush_size=1, flush_interval=3600.0, drain_timeout=0.1, on_drop=cb)
+    try:
+        r.record(Event("a"))
+        assert inner.entered.wait(2)
+        r.record(Event("b"))
+        t, out = _close_in_thread(r)
+        t.join(3)
+        assert not t.is_alive()
+        assert isinstance(out[0], DrainTimeoutError)
+        assert len(inner_errs) == 1  # the nested close saw the stored outcome
+    finally:
+        inner.release.set()
+
+
+def test_pending_flush_returns_when_close_gives_up() -> None:
+    inner = HungInner()
+    r = BufferedRecorder(inner, drain_timeout=0.1, **_QUIET)
+    try:
+        r.record(Event("a"))
+        r.record(Event("b"))
+        flushed = threading.Event()
+
+        def run() -> None:
+            r.flush()
+            flushed.set()
+
+        threading.Thread(target=run, daemon=True).start()
+        assert inner.entered.wait(2)
+        with pytest.raises(DrainTimeoutError):
+            r.close()
+        assert flushed.wait(0.5)
+    finally:
+        inner.release.set()
+
+
+class _Bail(BaseException):
+    pass
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_base_exception_from_on_drop_on_worker_does_not_hang() -> None:
+    inner = GatedInner(permits=100)
+    inner.fails = 1
+    inner.err = HTTPError(400, "bad")
+    drops: Drops = []
+    raised = []
+
+    def cb(evs: list[Event], reason: DropReason, _x: BaseException | None) -> None:
+        drops.append(([e.action for e in evs], reason))
+        if not raised:
+            raised.append(1)
+            raise _Bail
+
+    r = BufferedRecorder(inner, flush_size=1, flush_interval=3600.0, on_drop=cb)
+    r.record(Event("bad"))
+    r.record(Event("next"))
+    flushed = threading.Event()
+
+    def run() -> None:
+        r.flush()
+        flushed.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert flushed.wait(2)
+    t, out = _close_in_thread(r)
+    t.join(2)
+    assert not t.is_alive()
+    assert out == [None]
+    assert drops == [(["bad"], DropReason.REJECTED), (["next"], DropReason.SHUTDOWN)]
+
+
+def test_huge_drain_timeout_is_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(threading, "TIMEOUT_MAX", 0.3)
+    inner = HungInner()
+    r = BufferedRecorder(inner, drain_timeout=1e300, **_QUIET)
+    try:
+        r.record(Event("a"))
+        start = time.monotonic()
+        t, out = _close_in_thread(r)
+        t.join(0.3 + 1.5)
+        assert not t.is_alive()
+        assert isinstance(out[0], DrainTimeoutError)
+        assert time.monotonic() - start < 0.3 + 1.5
+    finally:
+        inner.release.set()
+
+
+@pytest.mark.parametrize(("size", "want"), [(float("inf"), [5]), (2.5, [2, 2, 1]), (0.5, [1] * 5)])
+def test_float_flush_size_is_clamped(size: float, want: list[int]) -> None:
+    inner = GatedInner(permits=100)
+    r = BufferedRecorder(inner, flush_size=size, flush_interval=3600.0)  # type: ignore[arg-type]
+    try:
+        for i in range(5):
+            r.record(Event(f"e{i}"))
+        r.flush(timeout=2)
+        assert inner.sizes() == want
+    finally:
+        r.close()
+
+
+def test_nan_flush_timeout_passes_none() -> None:
+    seen: list[float | None] = []
+
+    class Inner(FakeInner):
+        def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
+            seen.append(timeout)
+
+    r = BufferedRecorder(Inner(), flush_timeout=float("nan"), **_QUIET)
+    try:
+        r.record(Event("a"))
+        r.flush(timeout=2)
+        assert seen == [None]
+    finally:
         r.close()

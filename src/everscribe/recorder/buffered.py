@@ -39,6 +39,10 @@ DEFAULT_MAX_RETRY_DURATION = 300.0
 
 # Durations are clamped here so clock arithmetic and waits never overflow.
 _MAX_DURATION = 30 * 365 * 24 * 3600.0
+# Largest batch size; larger or infinite values clamp to it.
+_MAX_SIZE = 1 << 31
+# How long close waits for a cancelled worker before giving up on it.
+_CLOSE_GRACE = 1.0
 
 
 def _duration(v: float | None, default: float) -> float:
@@ -49,10 +53,15 @@ def _duration(v: float | None, default: float) -> float:
 
 
 def _size(v: int | None, default: int) -> int:
-    """A count; None, <= 0, or NaN use ``default``."""
+    """A count; None, <= 0, or NaN use ``default``, others clamp to [1, cap]."""
     if v is None or not v > 0:
         return default
-    return int(v)
+    return max(1, int(min(v, _MAX_SIZE)))
+
+
+def _wait_limit(v: float) -> float:
+    """A duration for thread.join, which raises past ``TIMEOUT_MAX``."""
+    return float(min(v, threading.TIMEOUT_MAX))
 
 
 def _timeout(v: float) -> float:
@@ -105,7 +114,10 @@ class BufferedStats:
 class BufferedRecorder:
     """Wraps ``inner`` with asynchronous batched writes. Spawns a background
     daemon thread that runs until :meth:`close`. Safe for concurrent
-    :meth:`record` calls. Implements :class:`Recorder`."""
+    :meth:`record` calls. Implements :class:`Recorder`.
+
+    Always call :meth:`close`: the worker is a daemon thread, so events still
+    buffered when the process exits are lost unreported."""
 
     def __init__(
         self,
@@ -138,9 +150,10 @@ class BufferedRecorder:
         self._flush_size = _size(flush_size, DEFAULT_FLUSH_SIZE)
         self._flush_interval = _duration(flush_interval, DEFAULT_FLUSH_INTERVAL)
         self._send_at = min(self._flush_size, buffer_size)
-        self._flush_timeout = _timeout(flush_timeout)
+        # NaN means unset, like None: the inner uses its own timeout.
+        self._flush_timeout = None if flush_timeout != flush_timeout else _timeout(flush_timeout)
         self._overflow = OverflowPolicy(overflow)
-        self._drain_timeout = drain_timeout
+        self._drain_timeout = _wait_limit(_duration(drain_timeout, DEFAULT_DRAIN_TIMEOUT))
         self._initial_backoff = _duration(initial_backoff, DEFAULT_INITIAL_BACKOFF)
         self._max_backoff = _duration(max_backoff, DEFAULT_MAX_BACKOFF)
         self._max_retry_duration = _duration(max_retry_duration, DEFAULT_MAX_RETRY_DURATION)
@@ -157,8 +170,12 @@ class BufferedRecorder:
         self._ticked = False
         self._closed = False
         self._stopped = False
-        # Set by close to stop retries (Task 5).
+        # Set by close to stop retries once the drain times out.
         self._cancel = threading.Event()
+        # The first close call's outcome, shared with later calls.
+        self._closing = False
+        self._close_done = False
+        self._close_timed_out = False
         self._on_drop = on_drop
         self._drops: dict[DropReason, int] = dict.fromkeys(DropReason, 0)
         self._flushed = 0
@@ -178,8 +195,8 @@ class BufferedRecorder:
     def record(self, e: Event) -> None:
         """Enqueue an event for asynchronous delivery. Empty-``action`` events
         are no-ops. Behavior when the buffer is full follows the configured
-        :class:`OverflowPolicy`. Calls after :meth:`close` are silently
-        dropped.
+        :class:`OverflowPolicy`. Calls after :meth:`close` report the event
+        to ``on_drop`` as ``CLOSED``.
 
         ``prepare_event`` runs here, on the calling thread, so the in-scope
         status capture (and request context) is applied before the event is
@@ -269,17 +286,76 @@ class BufferedRecorder:
                 self._cond.wait(min(left, threading.TIMEOUT_MAX))
 
     def close(self) -> None:
-        """Drain pending events and stop the worker thread. Idempotent. Raises
-        :class:`DrainTimeoutError` if the drain exceeds ``drain_timeout`` with
-        events still pending."""
+        """Drain pending events, with retries, and stop the worker thread.
+        Raises :class:`DrainTimeoutError` if ``drain_timeout`` elapses first;
+        what is still queued is then reported as ``SHUTDOWN``. Later and
+        concurrent calls wait for the first and share its outcome."""
         with self._cond:
-            if self._closed:
+            if not self._closed:
+                self._closed = True
+                # Wakes BLOCK producers (they report CLOSED) and the worker.
+                self._cond.notify_all()
+            if threading.current_thread() is self._thread:
+                # Called from on_drop on the worker: it can't wait for itself.
                 return
-            self._closed = True
-            self._cond.notify_all()
-        self._thread.join(timeout=self._drain_timeout)
-        if self._thread.is_alive():
+            if self._closing:
+                while not self._close_done:
+                    self._cond.wait()
+                timed_out = self._close_timed_out
+            else:
+                self._closing = True
+                timed_out = None
+        if timed_out is None:
+            timed_out = self._close_first()
+        if timed_out:
             raise DrainTimeoutError()
+
+    def _close_first(self) -> bool:
+        """Wait out the drain; returns whether it timed out."""
+        self._thread.join(self._drain_timeout)
+        if not self._thread.is_alive():
+            with self._cond:
+                # Normally empty; not if the worker died early.
+                left = self._take_all()
+                self._close_done = True
+                self._cond.notify_all()
+            self._report_shutdown(left)
+            return False
+        # Stop retries and backoff; a running send can't be interrupted.
+        self._cancel.set()
+        self._thread.join(_CLOSE_GRACE)
+        left = []
+        with self._cond:
+            if self._thread.is_alive():
+                # The worker reports its in-flight batch when the send returns.
+                left = self._take_all()
+                self._stopped = True
+            # Publish before reporting, so an on_drop calling close returns.
+            self._close_done = True
+            self._close_timed_out = True
+            self._cond.notify_all()
+        self._report_shutdown(left)
+        return True
+
+    def _take_all(self) -> list[Event]:
+        """Empty the buffer and count it resolved. Call holding ``_cond``."""
+        left = list(self._buf)
+        self._buf.clear()
+        self._taken += len(left)
+        self._done += len(left)
+        self._cond.notify_all()
+        return left
+
+    def _report_shutdown(self, events: list[Event]) -> None:
+        if not events:
+            return
+        self._report_drop(events, DropReason.SHUTDOWN)
+        self._logger.error(
+            "everscribe: recorder dropped events (reason=%s count=%d error=%s)",
+            DropReason.SHUTDOWN.value,
+            len(events),
+            None,
+        )
 
     def stats(self) -> BufferedStats:
         """Return cumulative counters for observability."""
@@ -303,6 +379,17 @@ class BufferedRecorder:
     # -- worker ------------------------------------------------------------
 
     def _run(self) -> None:
+        try:
+            self._loop()
+        finally:
+            # On any exit, even an exception from on_drop, release flush and
+            # close and report what is left.
+            with self._cond:
+                self._stopped = True
+                left = self._take_all()
+            self._report_shutdown(left)
+
+    def _loop(self) -> None:
         next_tick = time.monotonic() + self._flush_interval
         while True:
             with self._cond:
@@ -341,14 +428,7 @@ class BufferedRecorder:
                 self._logger.error("everscribe: recorder delivery failed (error=%s)", ex)
                 self._report_drop(batch, DropReason.REJECTED, ex)
                 rest = []
-            if rest:
-                self._report_drop(rest, DropReason.SHUTDOWN)
-                self._logger.error(
-                    "everscribe: recorder dropped events (reason=%s count=%d error=%s)",
-                    DropReason.SHUTDOWN.value,
-                    len(rest),
-                    None,
-                )
+            self._report_shutdown(rest)
             with self._cond:
                 self._done += k
                 self._cond.notify_all()
