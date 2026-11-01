@@ -19,6 +19,7 @@ from everscribe.recorder import (
     OverflowPolicy,
 )
 from everscribe.recorder import new as new_recorder
+from everscribe.recorder.http import Transport
 
 _QUIET = {"flush_size": 10_000, "flush_interval": 3600.0}
 
@@ -188,10 +189,7 @@ def test_drop_newest_warns_first_and_every_1000th(caplog: pytest.LogCaptureFixtu
     assert "dropped_total=1 " in warns[0].getMessage()
 
 
-def test_on_drop_routed_through_factory_and_client() -> None:
-    gate = threading.Semaphore(0)
-    sent = threading.Event()
-
+def _gated_transport(gate: threading.Semaphore, sent: threading.Event) -> Transport:
     def transport(
         url: str, body: bytes, headers: Mapping[str, str], timeout: float
     ) -> tuple[int, bytes]:
@@ -199,23 +197,29 @@ def test_on_drop_routed_through_factory_and_client() -> None:
         assert gate.acquire(timeout=5)
         return 200, b"{}"
 
+    return transport
+
+
+def test_on_drop_routed_through_factory_and_client() -> None:
     builders = (
-        lambda cb: new_recorder("p", "k", transport=transport, buffer_size=1, on_drop=cb, **_QUIET),
-        lambda cb: everscribe.new("p", "k").new_recorder(
-            transport=transport, buffer_size=1, on_drop=cb, **_QUIET
+        lambda t, cb: new_recorder("p", "k", transport=t, buffer_size=1, on_drop=cb, **_QUIET),
+        lambda t, cb: everscribe.new("p", "k").new_recorder(
+            transport=t, buffer_size=1, on_drop=cb, **_QUIET
         ),
     )
     for build in builders:
+        # A fresh gate per run, so no permits leak into the next one.
+        gate = threading.Semaphore(0)
+        sent = threading.Event()
         seen: list[DropReason] = []
-        r = build(seen_append(seen))
-        sent.clear()
+        r = build(_gated_transport(gate, sent), seen_append(seen))
         try:
             r.record(Event("inflight"))
             assert sent.wait(2)
             r.record(Event("a"))
             r.record(Event("b"))
         finally:
-            gate.release(10)
+            gate.release(2)  # "inflight" and "a"
             r.close()
         assert seen == [DropReason.BUFFER_FULL]
 

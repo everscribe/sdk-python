@@ -750,7 +750,14 @@ class _Bail(BaseException):
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_base_exception_from_on_drop_on_worker_does_not_hang() -> None:
-    inner = GatedInner(permits=100)
+    hold = threading.Event()
+
+    class HeldInner(GatedInner):
+        def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
+            assert hold.wait(5)
+            super().record_batch(events, timeout=timeout)
+
+    inner = HeldInner(permits=100)
     inner.fails = 1
     inner.err = HTTPError(400, "bad")
     drops: Drops = []
@@ -765,6 +772,8 @@ def test_base_exception_from_on_drop_on_worker_does_not_hang() -> None:
     r = BufferedRecorder(inner, flush_size=1, flush_interval=3600.0, on_drop=cb)
     r.record(Event("bad"))
     r.record(Event("next"))
+    # Both queued before "bad" fails, so "next" is SHUTDOWN, not CLOSED.
+    hold.set()
     flushed = threading.Event()
 
     def run() -> None:
