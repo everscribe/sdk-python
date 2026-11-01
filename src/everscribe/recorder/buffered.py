@@ -1,9 +1,10 @@
 """Buffered recorder: wraps another recorder with asynchronous, batched
 writes on a background daemon thread.
 
-Events are held in an in-memory buffer and flushed to the inner recorder when the pending
-batch reaches ``flush_size`` or ``flush_interval`` elapses, whichever comes
-first. ``record`` never blocks on the network (it only enqueues), so it is
+Events are held in an in-memory buffer and sent to the inner recorder in
+batches of up to ``flush_size``, one in flight, when the buffer reaches
+``min(flush_size, buffer_size)`` or ``flush_interval`` elapses, whichever
+comes first. ``record`` never blocks on the network (it only enqueues), so it is
 safe to call from async handlers - the flush I/O happens off the event loop
 on the worker thread.
 """
@@ -19,11 +20,11 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from queue import Empty, Queue
 
 from ..event import Event, prepare_event
 from ..event.types import Logger
 from .base import Recorder
+from .deliver import deliver
 from .drop import DroppedByReason, DropReason, OnDrop
 from .errors import BufferFullError, DrainTimeoutError
 
@@ -45,6 +46,13 @@ def _duration(v: float | None, default: float) -> float:
     if v is None or not v > 0:
         return default
     return float(min(v, _MAX_DURATION))
+
+
+def _size(v: int | None, default: int) -> int:
+    """A count; None, <= 0, or NaN use ``default``."""
+    if v is None or not v > 0:
+        return default
+    return int(v)
 
 
 def _timeout(v: float) -> float:
@@ -94,11 +102,6 @@ class BufferedStats:
     dropped_by_reason: DroppedByReason  # drops per reason
 
 
-@dataclass
-class _FlushRequest:
-    ack: Queue[BaseException | None]
-
-
 class BufferedRecorder:
     """Wraps ``inner`` with asynchronous batched writes. Spawns a background
     daemon thread that runs until :meth:`close`. Safe for concurrent
@@ -109,8 +112,8 @@ class BufferedRecorder:
         inner: Recorder,
         *,
         buffer_size: int = DEFAULT_BUFFER_SIZE,
-        flush_size: int = DEFAULT_FLUSH_SIZE,
-        flush_interval: float = DEFAULT_FLUSH_INTERVAL,
+        flush_size: int | None = DEFAULT_FLUSH_SIZE,
+        flush_interval: float | None = DEFAULT_FLUSH_INTERVAL,
         flush_timeout: float = DEFAULT_FLUSH_TIMEOUT,
         overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
@@ -128,11 +131,13 @@ class BufferedRecorder:
         A failed batch is retried with jittered backoff starting at
         ``initial_backoff`` seconds (default 0.5), capped at ``max_backoff``
         (default 30), for up to ``max_retry_duration`` (default 300). None or
-        <= 0 uses the default."""
+        <= 0 uses the default, as it does for ``flush_size`` and
+        ``flush_interval``."""
         self._inner = inner
         self._buffer_size = buffer_size
-        self._flush_size = flush_size
-        self._flush_interval = flush_interval
+        self._flush_size = _size(flush_size, DEFAULT_FLUSH_SIZE)
+        self._flush_interval = _duration(flush_interval, DEFAULT_FLUSH_INTERVAL)
+        self._send_at = min(self._flush_size, buffer_size)
         self._flush_timeout = _timeout(flush_timeout)
         self._overflow = OverflowPolicy(overflow)
         self._drain_timeout = drain_timeout
@@ -143,8 +148,17 @@ class BufferedRecorder:
 
         self._cond = threading.Condition()
         self._buf: deque[Event] = deque()
-        self._flush_requests: list[_FlushRequest] = []
+        # Exact flush counting: events appended, events taken by the worker,
+        # events resolved, and the highest count a flush is waiting on.
+        self._enqueued = 0
+        self._taken = 0
+        self._done = 0
+        self._flush_target = 0
+        self._ticked = False
         self._closed = False
+        self._stopped = False
+        # Set by close to stop retries (Task 5).
+        self._cancel = threading.Event()
         self._on_drop = on_drop
         self._drops: dict[DropReason, int] = dict.fromkeys(DropReason, 0)
         self._flushed = 0
@@ -156,7 +170,6 @@ class BufferedRecorder:
         self._record_batch: Callable[..., None] | None = rb if callable(rb) else None
         self._batch_timeout = rb is not None and _accepts_timeout(rb)
 
-        self._next_flush = time.monotonic() + flush_interval
         self._thread = threading.Thread(target=self._run, name="everscribe-recorder", daemon=True)
         self._thread.start()
 
@@ -193,9 +206,10 @@ class BufferedRecorder:
                         drop = DropReason.BUFFER_FULL
                 if drop is None:
                     self._buf.append(copy.copy(e))
-                    # notify_all (not notify): under BLOCK policy the worker and
-                    # blocked producers share the condition; only the worker acts.
-                    self._cond.notify_all()
+                    self._enqueued += 1
+                    if len(self._buf) >= self._send_at:
+                        # notify_all: BLOCK producers share the condition.
+                        self._cond.notify_all()
         if drop is None:
             return
         n = self._report_drop([e], drop)
@@ -231,22 +245,28 @@ class BufferedRecorder:
         return total
 
     def flush(self, timeout: float | None = None) -> None:
-        """Force an immediate flush of all events buffered at call time and
-        block until they are persisted. Raises the inner recorder's error if
-        the flush failed, or ``TimeoutError`` if ``timeout`` elapses first.
-        A no-op after :meth:`close`."""
-        ack: Queue[BaseException | None] = Queue(maxsize=1)
+        """Send every event queued at call time and block until each is
+        delivered or reported to ``on_drop``. Raises ``TimeoutError`` if
+        ``timeout`` elapses first; the send itself carries on. Events
+        recorded after the call don't hold it up. A no-op after
+        :meth:`close`."""
+        deadline = None if timeout is None else time.monotonic() + _timeout(timeout)
         with self._cond:
             if self._closed:
                 return
-            self._flush_requests.append(_FlushRequest(ack=ack))
-            self._cond.notify_all()
-        try:
-            err = ack.get(timeout=timeout)
-        except Empty as exc:
-            raise TimeoutError("recorder: flush timed out") from exc
-        if err is not None:
-            raise err
+            # Counted now; FIFO order makes done >= target exact.
+            target = self._enqueued
+            if target > self._flush_target:
+                self._flush_target = target
+                self._cond.notify_all()
+            while self._done < target and not self._stopped:
+                if deadline is None:
+                    self._cond.wait()
+                    continue
+                left = deadline - time.monotonic()
+                if not left > 0:  # also NaN
+                    raise TimeoutError("recorder: flush timed out")
+                self._cond.wait(min(left, threading.TIMEOUT_MAX))
 
     def close(self) -> None:
         """Drain pending events and stop the worker thread. Idempotent. Raises
@@ -283,68 +303,55 @@ class BufferedRecorder:
     # -- worker ------------------------------------------------------------
 
     def _run(self) -> None:
+        next_tick = time.monotonic() + self._flush_interval
         while True:
             with self._cond:
                 while True:
-                    if self._closed or self._flush_requests:
+                    now = time.monotonic()
+                    if now >= next_tick:
+                        # Also catches a tick that passed during a long send.
+                        self._ticked = True
+                        next_tick = now + self._flush_interval
+                    n = len(self._buf)
+                    if n == 0:
+                        self._ticked = False
+                        if self._closed:
+                            self._stopped = True
+                            self._cond.notify_all()
+                            return
+                    elif (
+                        self._closed
+                        or self._ticked
+                        or self._taken < self._flush_target
+                        or n >= self._send_at
+                    ):
                         break
-                    if len(self._buf) >= self._flush_size:
-                        break
-                    remaining = self._next_flush - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    self._cond.wait(timeout=remaining)
-                batch = list(self._buf)
-                self._buf.clear()
-                requests = self._flush_requests
-                self._flush_requests = []
-                closed = self._closed
-                self._next_flush = time.monotonic() + self._flush_interval
-                # Wake any producers blocked on a full buffer (BLOCK policy).
+                    self._cond.wait(min(next_tick - now, threading.TIMEOUT_MAX))
+                self._ticked = False
+                k = min(n, self._flush_size)
+                batch = [self._buf.popleft() for _ in range(k)]
+                self._taken += k
+                # Wake producers blocked on a full buffer (BLOCK policy).
                 self._cond.notify_all()
 
-            # Flush outside the lock so record() stays responsive during I/O.
-            err = self._flush_batch(batch)
-            for req in requests:
-                req.ack.put(err)
-            if closed:
-                return
-
-    def _flush_batch(self, batch: list[Event]) -> BaseException | None:
-        n = len(batch)
-        if n == 0:
-            return None
-        err: BaseException | None = None
-        try:
-            if self._record_batch is not None and self._batch_timeout:
-                self._record_batch(batch, timeout=self._flush_timeout)
-            elif self._record_batch is not None:
-                self._record_batch(batch)
-            else:
-                # Serial fallback for inner recorders without record_batch;
-                # the Recorder protocol has no timeout param, so we don't pass
-                # one here (HTTPRecorder always has record_batch above).
-                for e in batch:
-                    try:
-                        self._inner.record(e)
-                    except Exception as ex:  # noqa: BLE001 -- one failure must not abort the batch
-                        err = ex
-        except Exception as ex:  # noqa: BLE001 -- audit flush must never propagate
-            err = ex
-        if err is not None:
+            # Send outside the lock so record() stays responsive during I/O.
+            try:
+                rest = deliver(self, batch, self._cancel)
+            except Exception as ex:  # noqa: BLE001 -- deliver reports its own failures; bug guard
+                self._logger.error("everscribe: recorder delivery failed (error=%s)", ex)
+                self._report_drop(batch, DropReason.REJECTED, ex)
+                rest = []
+            if rest:
+                self._report_drop(rest, DropReason.SHUTDOWN)
+                self._logger.error(
+                    "everscribe: recorder dropped events (reason=%s count=%d error=%s)",
+                    DropReason.SHUTDOWN.value,
+                    len(rest),
+                    None,
+                )
             with self._cond:
-                self._flush_errs += 1
-                total = self._flush_errs
-            self._logger.error(
-                "everscribe: recorder flush failed (error=%s batch_size=%d flush_errs_total=%d)",
-                err,
-                n,
-                total,
-            )
-            return err
-        with self._cond:
-            self._flushed += n
-        return None
+                self._done += k
+                self._cond.notify_all()
 
 
 __all__ = [
