@@ -620,6 +620,7 @@ def test_record_concurrent_with_close_every_event_resolved_once() -> None:
         r.close()
         for th in threads:
             th.join(5)
+            assert not th.is_alive()
         seen = _actions(inner) + [a for evs, _ in drops for a in evs]
         want = [f"t{t}-{i}" for t in range(8) for i in range(300)]
         assert sorted(seen) == sorted(want)
@@ -776,6 +777,62 @@ def test_base_exception_from_on_drop_on_worker_does_not_hang() -> None:
     assert not t.is_alive()
     assert out == [None]
     assert drops == [(["bad"], DropReason.REJECTED), (["next"], DropReason.SHUTDOWN)]
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+@pytest.mark.parametrize("overflow", list(OverflowPolicy))
+def test_record_after_worker_died_reports_closed(overflow: OverflowPolicy) -> None:
+    inner = GatedInner(permits=100)
+    inner.fails = 1
+    inner.err = HTTPError(400, "bad")
+    drops: Drops = []
+
+    def cb(evs: list[Event], reason: DropReason, _x: BaseException | None) -> None:
+        drops.append(([e.action for e in evs], reason))
+        if reason is DropReason.REJECTED:
+            raise _Bail
+
+    r = BufferedRecorder(
+        inner, buffer_size=1, flush_size=1, flush_interval=3600.0, overflow=overflow, on_drop=cb
+    )
+    r.record(Event("bad"))  # buffer full: the worker takes it and dies
+    assert wait_until(lambda: not r._thread.is_alive())
+    done = threading.Event()
+
+    def produce() -> None:
+        r.record(Event("late"))
+        done.set()
+
+    threading.Thread(target=produce, daemon=True).start()
+    assert done.wait(2)  # a BLOCK producer doesn't hang
+    assert drops == [(["bad"], DropReason.REJECTED), (["late"], DropReason.CLOSED)]
+    r.flush(timeout=1)
+    r.close()
+
+
+def test_interrupted_close_can_be_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    inner = GatedInner()
+    r = BufferedRecorder(inner, **_QUIET)
+    r.record(Event("a"))
+    real_join = r._thread.join
+    calls = []
+
+    def join(timeout: float | None = None) -> None:
+        if not calls:
+            calls.append(1)
+            raise KeyboardInterrupt
+        real_join(timeout)
+
+    monkeypatch.setattr(r._thread, "join", join)
+    with pytest.raises(KeyboardInterrupt):
+        r.close()
+    t, out = _close_in_thread(r)
+    assert wait_until(lambda: inner.calls == 1)
+    inner.gate.release()
+    t.join(3)
+    assert not t.is_alive()
+    assert out == [None]
+    assert _actions(inner) == ["a"]
 
 
 def test_huge_drain_timeout_is_clamped(monkeypatch: pytest.MonkeyPatch) -> None:

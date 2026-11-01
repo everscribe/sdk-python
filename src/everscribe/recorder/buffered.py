@@ -138,7 +138,9 @@ class BufferedRecorder:
         """``on_drop`` is called with (events, reason, err) when events are
         dropped. It must not block, must not call ``record``, ``flush``, or
         ``close`` on this recorder, and may be called concurrently from
-        request threads and the worker.
+        request threads and the worker. A ``BaseException`` it raises on the
+        worker thread stops the worker and can leave the rest of that batch
+        unreported.
 
         A failed batch is retried with jittered backoff starting at
         ``initial_backoff`` seconds (default 0.5), capped at ``max_backoff``
@@ -208,16 +210,21 @@ class BufferedRecorder:
         # Mark the event first so end_event cannot report it a second time.
         prepare_event(e)
         with self._cond:
-            if self._closed:
+            # A stopped worker (it died) drains nothing, so report CLOSED.
+            if self._closed or self._stopped:
                 drop = DropReason.CLOSED
             else:
                 if len(self._buf) >= self._buffer_size:
                     if self._overflow is OverflowPolicy.ERROR:
                         raise BufferFullError()
                     if self._overflow is OverflowPolicy.BLOCK:
-                        while len(self._buf) >= self._buffer_size and not self._closed:
+                        while (
+                            len(self._buf) >= self._buffer_size
+                            and not self._closed
+                            and not self._stopped
+                        ):
                             self._cond.wait()
-                        if self._closed:
+                        if self._closed or self._stopped:
                             drop = DropReason.CLOSED
                     else:  # DROP_NEWEST
                         drop = DropReason.BUFFER_FULL
@@ -298,15 +305,22 @@ class BufferedRecorder:
             if threading.current_thread() is self._thread:
                 # Called from on_drop on the worker: it can't wait for itself.
                 return
-            if self._closing:
-                while not self._close_done:
-                    self._cond.wait()
-                timed_out = self._close_timed_out
+            while self._closing and not self._close_done:
+                self._cond.wait()
+            if self._close_done:
+                timed_out: bool | None = self._close_timed_out
             else:
                 self._closing = True
                 timed_out = None
         if timed_out is None:
-            timed_out = self._close_first()
+            try:
+                timed_out = self._close_first()
+            except BaseException:
+                # Interrupted (e.g. Ctrl-C): let the next caller take over.
+                with self._cond:
+                    self._closing = False
+                    self._cond.notify_all()
+                raise
         if timed_out:
             raise DrainTimeoutError()
 
