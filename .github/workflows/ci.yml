@@ -16,6 +16,8 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: pip install -e ".[dev,fastapi,flask,django,grpc]"
+      - name: Format
+        run: ruff format --check .
       - name: Lint
         run: ruff check .
       - name: Typecheck

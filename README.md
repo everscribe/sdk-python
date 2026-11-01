@@ -17,25 +17,24 @@ Python SDK for the [Everscribe](https://everscribe.io) API. It exposes **middlew
 
 </div>
 
-## 📖 Setup Documentation
+## Coding with Claude?
 
-| Setup link | What it is | Pick it when |
-|---|---|---|
-| [Hosted AI agent](https://everscribe.io/docs/quickstart/hosted-ui) | You install our GitHub App. Our server-side agent walks your repo, proposes a plan, and opens a PR you review. | You want zero hand-wiring and are fine granting Everscribe read access to your repo. Paid feature. |
-| [BYOK Claude Code skill](https://everscribe.io/docs/quickstart/skill) | Install the [`es` CLI](https://github.com/everscribe/cli) and run `es skills download setup`. That drops a skill into your Claude Code skills directory, and your own local Claude agent does the setup. Same behavior as the hosted agent, but against *your* Anthropic key, and your source never leaves your machine. | You do not want to grant Everscribe read access to your repo, and/or you want a free option and already have Claude Code. |
-| [Wire it up yourself](https://everscribe.io/docs/sdks/python-install) | Install the SDK and add the calls by hand. | You want full control, or you are instrumenting a small surface. |
+Install the [`es` CLI](https://github.com/everscribe/cli) to download the [Claude Code Setup Skill](https://everscribe.io/docs/quickstart/skill), which finds your handlers, proposes audit events, and wires up the SDK and [embeddable component](https://github.com/everscribe/components) for you.
 
-## Supported frameworks
+## Python SDK reference
 
-- `FastAPI`
-- `Starlette`
-- `Flask`
-- `Django`
-
-> [!NOTE]
-> Interceptors available for gRPC servers.
-
-Your framework missing? [Open an issue](https://github.com/everscribe/sdk-python/issues).
+| Page | Covers |
+|---|---|
+| [Install](https://everscribe.io/docs/sdks/python-install) | `pip install` and the framework extras. |
+| [Credential binding](https://everscribe.io/docs/sdks/python-credential-binding) | `everscribe.new`, `new_from_env`, and single-surface constructors. |
+| [Event shape](https://everscribe.io/docs/sdks/python-event-shape) | The `Event` dataclass and its fields. |
+| [BufferedRecorder](https://everscribe.io/docs/sdks/python-buffered-recorder) | Options, overflow policies, `close`, `flush` and delivery failures. |
+| [Middleware and interceptors](https://everscribe.io/docs/sdks/python-asgi-middleware) | ASGI, Flask, Django and gRPC adapters, actor resolvers. |
+| [Recorder](https://everscribe.io/docs/sdks/python-recorder) | Diffs, redaction, several events per request, direct recording. |
+| [Minter](https://everscribe.io/docs/sdks/python-minter) | Embed tokens, tenant scoping, `TokenOptions`. |
+| [Idempotency](https://everscribe.io/docs/sdks/python-idempotency) | `idempotency_key` and `auto_idempotency_key`. |
+| [Errors](https://everscribe.io/docs/sdks/python-errors) | `HTTPError`, `NetworkError`, `EncodeError` and the other error types. |
+| [Behaviors worth knowing](https://everscribe.io/docs/sdks/python-behaviors) | Empty `action`, non-blocking `record()`, caller-set fields. |
 
 ## Additional resources
 
