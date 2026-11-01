@@ -12,12 +12,28 @@ class HTTPError(Exception):
     def __init__(self, status_code: int, body: str) -> None:
         self.status_code = status_code
         self.body = body
+        self.retry_after: float = 0.0  # seconds from Retry-After; 0 when absent
         super().__init__(f"recorder: http {status_code}: {body}")
 
     def transient(self) -> bool:
         """Whether the error is likely to resolve on retry (5xx server errors
         and 429 rate limits)."""
         return self.status_code >= 500 or self.status_code == 429
+
+
+class NetworkError(Exception):
+    """Raised by :class:`HTTPRecorder` when the transport fails before a
+    response arrives (connection refused, timeout, reset). The original
+    exception is on ``__cause__``. Always transient."""
+
+    def transient(self) -> bool:
+        return True
+
+
+class EncodeError(Exception):
+    """Raised by :class:`HTTPRecorder` when an event cannot be serialized to
+    JSON (the original ``TypeError``/``ValueError`` is on ``__cause__``).
+    Nothing is sent."""
 
 
 class BufferFullError(Exception):
@@ -37,4 +53,10 @@ class DrainTimeoutError(Exception):
         super().__init__(message)
 
 
-__all__ = ["BufferFullError", "DrainTimeoutError", "HTTPError"]
+__all__ = [
+    "BufferFullError",
+    "DrainTimeoutError",
+    "EncodeError",
+    "HTTPError",
+    "NetworkError",
+]

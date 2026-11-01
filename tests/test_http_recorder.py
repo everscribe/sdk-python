@@ -13,7 +13,7 @@ import pytest
 
 from everscribe.event import Event
 from everscribe.recorder import HTTPRecorder
-from everscribe.recorder.errors import HTTPError
+from everscribe.recorder.errors import EncodeError, HTTPError, NetworkError
 
 
 class RecordingTransport:
@@ -190,3 +190,102 @@ def test_urllib_transport_non_2xx_raises() -> None:
     finally:
         server.shutdown()
     assert ei.value.status_code == 401
+
+
+class _HeaderTransport:
+    def __init__(self, status: int, headers: Mapping[str, str]) -> None:
+        self.status = status
+        self.headers = headers
+
+    def __call__(
+        self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
+    ) -> tuple[int, bytes, Mapping[str, str]]:
+        return self.status, b"slow down", self.headers
+
+
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        ("5", 5.0),
+        ("0", 0.0),
+        ("-5", 0.0),
+        ("abc", 0.0),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", 0.0),
+    ],
+)
+def test_retry_after_parsing(value: str, want: float) -> None:
+    t = _HeaderTransport(429, {"Retry-After": value})
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(HTTPError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.retry_after == want
+
+
+def test_retry_after_header_name_case_insensitive() -> None:
+    t = _HeaderTransport(503, {"retry-after": "7"})
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(HTTPError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.retry_after == 7.0
+
+
+def test_two_tuple_transport_still_works() -> None:
+    r = HTTPRecorder("p", "k", transport=RecordingTransport(status=429))
+    with pytest.raises(HTTPError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.retry_after == 0.0
+
+
+def test_transport_urlerror_becomes_network_error() -> None:
+    import urllib.error
+
+    cause = urllib.error.URLError("refused")
+
+    def t(url: str, body: bytes, headers: Mapping[str, str], timeout: float):
+        raise cause
+
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(NetworkError) as ei:
+        r.record_batch([Event("a")])
+    assert ei.value.__cause__ is cause
+    assert ei.value.transient() is True
+
+
+def test_transport_http_exception_becomes_network_error() -> None:
+    import http.client
+
+    def t(url: str, body: bytes, headers: Mapping[str, str], timeout: float):
+        raise http.client.RemoteDisconnected("gone")
+
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(NetworkError):
+        r.record(Event("a"))
+
+
+def test_transport_runtime_error_propagates() -> None:
+    def t(url: str, body: bytes, headers: Mapping[str, str], timeout: float):
+        raise RuntimeError("bug")
+
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(RuntimeError, match="bug"):
+        r.record_batch([Event("a")])
+
+
+def test_unserializable_metadata_is_encode_error() -> None:
+    t = RecordingTransport()
+    r = HTTPRecorder("p", "k", transport=t)
+    ev = Event("a", metadata={"x": object()})
+    with pytest.raises(EncodeError) as ei:
+        r.record_batch([ev])
+    assert isinstance(ei.value.__cause__, TypeError)
+    assert t.calls == []
+
+
+def test_circular_metadata_is_encode_error() -> None:
+    t = RecordingTransport()
+    r = HTTPRecorder("p", "k", transport=t)
+    loop: dict = {}
+    loop["self"] = loop
+    with pytest.raises(EncodeError):
+        r.record(Event("a", metadata=loop))
+    assert t.calls == []

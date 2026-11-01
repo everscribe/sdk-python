@@ -18,7 +18,7 @@ from .buffered import (
     BufferedStats,
     OverflowPolicy,
 )
-from .errors import BufferFullError, DrainTimeoutError, HTTPError
+from .errors import BufferFullError, DrainTimeoutError, EncodeError, HTTPError, NetworkError
 from .factory import new
 from .http import (
     DEFAULT_BASE_URL,
@@ -44,6 +44,8 @@ __all__ = [
     "HTTPError",
     "BufferFullError",
     "DrainTimeoutError",
+    "NetworkError",
+    "EncodeError",
     # Defaults
     "DEFAULT_BASE_URL",
     "DEFAULT_REQUEST_TIMEOUT",

@@ -11,42 +11,62 @@ Wire format::
     Content-Type:  application/json
 
 Non-2xx responses raise :class:`HTTPError`; transport-level failures
-(connection refused, timeout) propagate as the underlying
-``urllib``/``socket`` exception.
+(connection refused, timeout) raise :class:`NetworkError`; unserializable
+events raise :class:`EncodeError`.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 
 from ..event import Event, event_to_wire, prepare_event
-from .errors import HTTPError
+from .errors import EncodeError, HTTPError, NetworkError
 
 DEFAULT_BASE_URL = "https://api.everscribe.io"
 DEFAULT_REQUEST_TIMEOUT = 10.0
 
-# A transport takes (url, body, headers, timeout) and returns
-# (status_code, response_body). The default uses urllib; tests inject their
-# own to avoid the network.
-Transport = Callable[[str, bytes, Mapping[str, str], float], "tuple[int, bytes]"]
+# A transport takes (url, body, headers, timeout) and returns (status_code,
+# response_body) or (status_code, response_body, response_headers); headers
+# feed Retry-After. The default uses urllib; tests inject their own.
+Transport = Callable[
+    [str, bytes, Mapping[str, str], float],
+    "tuple[int, bytes] | tuple[int, bytes, Mapping[str, str]]",
+]
 
 _MAX_ERROR_BODY = 4096
 
 
 def _urllib_transport(
     url: str, body: bytes, headers: Mapping[str, str], timeout: float
-) -> tuple[int, bytes]:
+) -> tuple[int, bytes, Mapping[str, str]]:
     req = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             resp.read()  # drain so the connection can be reused
             status: int = resp.status
-            return status, b""
+            return status, b"", dict(resp.headers.items())
     except urllib.error.HTTPError as e:  # non-2xx
-        return e.code, e.read(_MAX_ERROR_BODY)
+        return e.code, e.read(_MAX_ERROR_BODY), dict(e.headers.items())
+
+
+def _retry_after(headers: Mapping[str, str]) -> float:
+    """Seconds from a positive-integer Retry-After; 0 otherwise (dates ignored)."""
+    for k, v in headers.items():
+        if k.lower() == "retry-after":
+            v = v.strip()
+            return float(int(v)) if v.isascii() and v.isdigit() and int(v) > 0 else 0.0
+    return 0.0
+
+
+def _dumps(obj: object) -> bytes:
+    try:
+        return json.dumps(obj).encode("utf-8")
+    except (TypeError, ValueError) as e:
+        raise EncodeError(f"recorder: encode event: {e}") from e
 
 
 class HTTPRecorder:
@@ -77,7 +97,7 @@ class HTTPRecorder:
             return
         prepare_event(e)
         self._finalize(e)
-        body = json.dumps(event_to_wire(e)).encode("utf-8")
+        body = _dumps(event_to_wire(e))
         self._post(self._events_path(), body, timeout)
 
     def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
@@ -94,7 +114,7 @@ class HTTPRecorder:
             wire.append(event_to_wire(e))
         if not wire:
             return
-        body = json.dumps({"events": wire}).encode("utf-8")
+        body = _dumps({"events": wire})
         self._post(self._batch_path(), body, timeout)
 
     def _finalize(self, e: Event) -> None:
@@ -116,11 +136,18 @@ class HTTPRecorder:
             "Content-Type": "application/json",
         }
         t = timeout if timeout is not None else self._request_timeout
-        status, resp_body = self._transport(self.base_url + path, body, headers, t)
+        try:
+            res = self._transport(self.base_url + path, body, headers, t)
+        except (OSError, http.client.HTTPException) as e:
+            raise NetworkError(f"recorder: {e}") from e
+        status, resp_body = res[0], res[1]
         if 200 <= status < 300:
             return
         text = resp_body[:_MAX_ERROR_BODY].decode("utf-8", "replace").strip()
-        raise HTTPError(status, text)
+        err = HTTPError(status, text)
+        if len(res) > 2:
+            err.retry_after = _retry_after(res[2])
+        raise err
 
 
 __all__ = ["DEFAULT_BASE_URL", "DEFAULT_REQUEST_TIMEOUT", "HTTPRecorder", "Transport"]
