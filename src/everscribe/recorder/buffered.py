@@ -129,11 +129,12 @@ class BufferedRecorder:
             return
         # Decide under the lock, report the drop after releasing it.
         drop: DropReason | None = None
+        # Mark the event first so end_event cannot report it a second time.
+        prepare_event(e)
         with self._cond:
             if self._closed:
                 drop = DropReason.CLOSED
             else:
-                prepare_event(e)
                 if len(self._buf) >= self._buffer_size:
                     if self._overflow is OverflowPolicy.ERROR:
                         raise BufferFullError()

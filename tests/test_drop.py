@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -185,3 +186,37 @@ def test_on_drop_routed_through_factory_and_client() -> None:
 
 def seen_append(seen: list[DropReason]) -> OnDrop:
     return lambda _e, reason, _x: seen.append(reason)
+
+
+def test_manual_record_after_close_then_end_event_reports_once() -> None:
+    from everscribe.event import end_event
+    from everscribe.event.context import request_scope
+
+    seen: list[DropReason] = []
+    r = BufferedRecorder(Inner(), on_drop=seen_append(seen), **_QUIET)
+    r.close()
+    with request_scope(Event("req")) as e:
+        r.record(e)
+        end_event(e, r)
+    assert seen == [DropReason.CLOSED]
+    assert r.stats().dropped_by_reason.closed == 1
+
+
+def test_block_producer_woken_by_close_reports_closed_once() -> None:
+    seen: list[DropReason] = []
+    r = BufferedRecorder(
+        Inner(),
+        buffer_size=1,
+        overflow=OverflowPolicy.BLOCK,
+        on_drop=seen_append(seen),
+        **_QUIET,
+    )
+    r.record(Event("fill"))
+    t = threading.Thread(target=r.record, args=(Event("blocked"),))
+    t.start()
+    time.sleep(0.1)
+    r.close()
+    t.join(timeout=2)
+    assert not t.is_alive()
+    assert seen == [DropReason.CLOSED]
+    assert r.stats().dropped_by_reason.closed == 1
