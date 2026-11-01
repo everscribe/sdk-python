@@ -504,3 +504,89 @@ def test_options_routed_through_factory_and_client() -> None:
             assert got == (1.0, 2.0, 3.0)
         finally:
             rec.close()
+
+
+class StrictEvent(threading.Event):
+    """Raises like Windows when a wait exceeds threading.TIMEOUT_MAX."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if timeout is not None and timeout > threading.TIMEOUT_MAX:
+            raise OverflowError("timeout value is too large")
+        self.waits.append(timeout or 0.0)
+        return super().wait(timeout)
+
+
+def test_default_sleep_clamps_to_timeout_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    from everscribe.recorder.deliver import cancel_sleep
+
+    monkeypatch.setattr(threading, "TIMEOUT_MAX", 0.01)
+    cancel = StrictEvent()
+    start = time.monotonic()
+    cancel_sleep(cancel)(0.05)
+    assert time.monotonic() - start >= 0.05
+    assert len(cancel.waits) >= 2
+    assert all(w <= 0.01 for w in cancel.waits)
+
+
+def test_default_sleep_clamped_still_ends_on_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    from everscribe.recorder.deliver import cancel_sleep
+
+    monkeypatch.setattr(threading, "TIMEOUT_MAX", 0.01)
+    cancel = StrictEvent()
+    threading.Timer(0.05, cancel.set).start()
+    start = time.monotonic()
+    cancel_sleep(cancel)(1e9)
+    assert time.monotonic() - start < 5
+
+
+@pytest.mark.parametrize(
+    ("given", "want"),
+    [
+        (7.0, 7.0),
+        (0.0, 0.0),
+        (-1.0, -1.0),
+        (float("inf"), "max"),
+        (1e308, "max"),
+    ],
+)
+def test_flush_timeout_clamped(clock: Clock, given: float, want: float | str) -> None:
+    from everscribe.recorder.buffered import _MAX_DURATION
+
+    inner = Inner(clock, lambda _i, _e: None)
+    rec = make(inner, flush_timeout=given)
+    try:
+        run(rec, events(1), clock)
+        cap = min(_MAX_DURATION, threading.TIMEOUT_MAX)
+        assert inner.timeouts == [cap if want == "max" else want]
+    finally:
+        rec.close()
+
+
+@pytest.mark.parametrize("raises", [False, True], ids=["ok", "raises"])
+def test_cancel_during_serial_fallback(clock: Clock, raises: bool) -> None:
+    cancel = threading.Event()
+
+    def fail(id: str, _nth: int) -> BaseException | None:
+        if id == "e1":
+            return HTTPError(503, "")
+        if id == "e2":
+            cancel.set()
+            return HTTPError(400, "") if raises else None
+        return None
+
+    inner = SerialInner(fail)
+    drops = Drops()
+    rec = make(inner, drops)
+    try:
+        out = run(rec, events(5), clock, cancel=cancel)
+        tail = ["e2", "e3", "e4"] if raises else ["e3", "e4"]
+        assert [e.id for e in out] == ["e1", *tail]
+        assert inner.calls == ["e0", "e1", "e2"]
+        assert drops.calls == []
+        assert rec.stats().retries == 0
+    finally:
+        rec.close()

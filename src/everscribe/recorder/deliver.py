@@ -40,8 +40,21 @@ def deliver(
         return []
     if cancel.is_set():
         return list(batch)
-    d = _Delivery(rec, cancel, clock, sleep or cancel.wait, jitter or full_jitter)
+    d = _Delivery(rec, cancel, clock, sleep or cancel_sleep(cancel), jitter or full_jitter)
     return d.send(list(batch))
+
+
+def cancel_sleep(cancel: threading.Event) -> Callable[[float], None]:
+    """Sleep that ends early when ``cancel`` is set. Waits in chunks no
+    longer than ``threading.TIMEOUT_MAX`` so long waits never raise."""
+
+    def sleep(s: float) -> None:
+        end = time.monotonic() + s
+        left = s
+        while left > 0 and not cancel.wait(min(left, threading.TIMEOUT_MAX)):
+            left = end - time.monotonic()
+
+    return sleep
 
 
 class _Delivery:
@@ -182,4 +195,4 @@ def _debug(rec: BufferedRecorder) -> Callable[..., object]:
     return dbg if callable(dbg) else (lambda *_a, **_k: None)
 
 
-__all__ = ["SPLIT_BUDGET", "deliver", "full_jitter"]
+__all__ = ["SPLIT_BUDGET", "cancel_sleep", "deliver", "full_jitter"]

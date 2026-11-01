@@ -47,6 +47,14 @@ def _duration(v: float | None, default: float) -> float:
     return float(min(v, _MAX_DURATION))
 
 
+def _timeout(v: float) -> float:
+    """Clamp a huge flush timeout to what sockets and waits accept; other
+    values pass through unchanged."""
+    if v is None or not v > 0:
+        return v
+    return float(min(v, _MAX_DURATION, threading.TIMEOUT_MAX))
+
+
 def _accepts_timeout(fn: Callable[..., None]) -> bool:
     """Whether ``fn`` takes a ``timeout`` keyword (or ``**kwargs``)."""
     try:
@@ -125,7 +133,7 @@ class BufferedRecorder:
         self._buffer_size = buffer_size
         self._flush_size = flush_size
         self._flush_interval = flush_interval
-        self._flush_timeout = flush_timeout
+        self._flush_timeout = _timeout(flush_timeout)
         self._overflow = OverflowPolicy(overflow)
         self._drain_timeout = drain_timeout
         self._initial_backoff = _duration(initial_backoff, DEFAULT_INITIAL_BACKOFF)
