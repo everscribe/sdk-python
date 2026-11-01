@@ -14,6 +14,7 @@ from everscribe.event import (
     current_event,
     end_event,
     event_scope,
+    is_auto_recording,
     new_from_context,
     prepare_event,
     request_scope,
@@ -294,3 +295,36 @@ def test_dedupe_is_per_request_not_global() -> None:
         second.action = "x"
         end_event(second, rec)
     assert len(rec.events) == 2
+
+
+# --- is_auto_recording ------------------------------------------------------
+
+
+class ProbeRecorder:
+    """Records is_auto_recording for the event it is handed and for ``other``."""
+
+    def __init__(self, other: Event) -> None:
+        self.other = other
+        self.seen: list[tuple[bool, bool]] = []
+
+    def record(self, e: Event) -> None:
+        self.seen.append((is_auto_recording(e), is_auto_recording(self.other)))
+
+
+def test_is_auto_recording_only_inside_end_event_for_that_event() -> None:
+    other = Event("other")
+    rec = ProbeRecorder(other)
+    with request_scope(_template()) as e:
+        e.action = "x"
+        assert not is_auto_recording(e)
+        end_event(e, rec)
+        assert not is_auto_recording(e)
+    assert rec.seen == [(True, False)]
+    assert not is_auto_recording(e)
+
+
+def test_is_auto_recording_false_for_direct_record() -> None:
+    rec = ProbeRecorder(Event("other"))
+    e = Event("x")
+    rec.record(e)
+    assert rec.seen == [(False, False)]

@@ -84,6 +84,15 @@ _event_context: ContextVar[_EventContext | None] = ContextVar(
     "everscribe_event_context", default=None
 )
 
+# Id of the event end_event is recording, set only around its record call.
+_auto_recording: ContextVar[str] = ContextVar("everscribe_auto_recording", default="")
+
+
+def is_auto_recording(e: Event) -> bool:
+    """For Recorder implementers: true while :func:`end_event` is recording
+    ``e``, so a failure there has no caller and should be reported."""
+    return bool(e.id) and _auto_recording.get() == e.id
+
 
 def new_from_context() -> Event:
     """Return a fresh Event pre-populated from the request-scoped template
@@ -234,11 +243,14 @@ def end_event(e: Event, recorder: Recorder | None, logger: Logger | None = None)
     if e.occurred_at is None:  # defensive; the default factory always sets it
         e.occurred_at = _now_utc()
     _apply_outcome(e, final=True)
+    token = _auto_recording.set(e.id)
     try:
         recorder.record(e)
     except Exception as err:  # noqa: BLE001 -- audit failure must not break the caller
         if logger is not None:
             logger.error("everscribe: auto-record failed: %s", err)
+    finally:
+        _auto_recording.reset(token)
 
 
 def _claim_recorded(e: Event) -> bool:
@@ -331,6 +343,7 @@ __all__ = [
     "current_event",
     "end_event",
     "event_scope",
+    "is_auto_recording",
     "new_from_context",
     "prepare_event",
     "request_scope",

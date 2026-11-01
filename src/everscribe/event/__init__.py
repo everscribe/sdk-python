@@ -8,6 +8,7 @@ from .context import (
     current_event,
     end_event,
     event_scope,
+    is_auto_recording,
     new_from_context,
     prepare_event,
     request_scope,
@@ -55,6 +56,7 @@ __all__ = [
     "request_scope",
     "prepare_event",
     "end_event",
+    "is_auto_recording",
     "result_from_http_status",
     # Origin
     "origin_from_request",

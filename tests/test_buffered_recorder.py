@@ -3,14 +3,15 @@ close, batch-vs-serial, error propagation, and stats."""
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
 
 import pytest
 
-from everscribe.event import Event
-from everscribe.recorder import BufferedRecorder, DropReason, OverflowPolicy
+from everscribe.event import Event, end_event
+from everscribe.recorder import BufferedRecorder, DropReason, OverflowPolicy, buffered
 from everscribe.recorder.errors import BufferFullError, DrainTimeoutError, HTTPError, NetworkError
 
 
@@ -925,4 +926,131 @@ def test_nan_flush_timeout_passes_none() -> None:
         r.flush(timeout=2)
         assert seen == [None]
     finally:
+        r.close()
+
+
+# --- auto-record reporting -------------------------------------------------
+
+
+Reports = list[tuple[list[str], DropReason, BaseException | None]]
+
+
+def _collect_err(
+    reports: Reports,
+) -> Callable[[list[Event], DropReason, BaseException | None], None]:
+    lock = threading.Lock()
+
+    def cb(evs: list[Event], reason: DropReason, err: BaseException | None) -> None:
+        with lock:
+            reports.append(([e.action for e in evs], reason, err))
+
+    return cb
+
+
+_LOG = logging.getLogger("everscribe.test.autorecord")
+
+
+def test_auto_record_overflow_error_reports_buffer_full(caplog: pytest.LogCaptureFixture) -> None:
+    inner = GatedInner()
+    reports: Reports = []
+    r = BufferedRecorder(
+        inner, buffer_size=1, overflow=OverflowPolicy.ERROR, on_drop=_collect_err(reports), **_QUIET
+    )
+    try:
+        hold_one_in_flight(r, inner)
+        r.record(Event("a"))
+        with caplog.at_level(logging.ERROR, logger=_LOG.name):
+            end_event(Event("auto"), r, _LOG)
+        assert len(reports) == 1
+        actions, reason, err = reports[0]
+        assert actions == ["auto"]
+        assert reason is DropReason.BUFFER_FULL
+        assert isinstance(err, BufferFullError)
+        assert any("everscribe: auto-record failed" in m for m in caplog.messages)
+        assert r.stats().dropped == 1
+    finally:
+        inner.gate.release(10)
+        r.close()
+
+
+def test_direct_record_overflow_error_raises_without_report() -> None:
+    inner = GatedInner()
+    reports: Reports = []
+    r = BufferedRecorder(
+        inner, buffer_size=1, overflow=OverflowPolicy.ERROR, on_drop=_collect_err(reports), **_QUIET
+    )
+    try:
+        hold_one_in_flight(r, inner)
+        r.record(Event("a"))
+        with pytest.raises(BufferFullError):
+            r.record(Event("b"))
+        assert reports == []
+        assert r.stats().dropped == 0
+    finally:
+        inner.gate.release(10)
+        r.close()
+
+
+def test_auto_record_block_times_out_and_reports(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(buffered, "AUTO_RECORD_TIMEOUT", 0.2)
+    inner = GatedInner()
+    reports: Reports = []
+    r = BufferedRecorder(
+        inner, buffer_size=1, overflow=OverflowPolicy.BLOCK, on_drop=_collect_err(reports), **_QUIET
+    )
+    try:
+        hold_one_in_flight(r, inner)
+        r.record(Event("a"))  # fills the buffer
+        done = threading.Event()
+
+        def produce() -> None:
+            end_event(Event("auto"), r, _LOG)
+            done.set()
+
+        with caplog.at_level(logging.ERROR, logger=_LOG.name):
+            threading.Thread(target=produce, daemon=True).start()
+            assert done.wait(3)
+        assert len(reports) == 1
+        actions, reason, err = reports[0]
+        assert actions == ["auto"]
+        assert reason is DropReason.BUFFER_FULL
+        assert isinstance(err, TimeoutError)
+        assert any("everscribe: auto-record failed" in m for m in caplog.messages)
+        assert len(r._cond._waiters) == 0  # type: ignore[attr-defined]
+        inner.gate.release(10)  # space frees; the dropped event must not appear
+        r.flush(timeout=2)
+        assert _actions(inner) == ["inflight", "a"]
+        assert len(reports) == 1
+    finally:
+        inner.gate.release(10)
+        r.close()
+
+
+def test_auto_record_block_delivers_when_space_frees(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(buffered, "AUTO_RECORD_TIMEOUT", 5.0)
+    inner = GatedInner()
+    reports: Reports = []
+    r = BufferedRecorder(
+        inner, buffer_size=1, overflow=OverflowPolicy.BLOCK, on_drop=_collect_err(reports), **_QUIET
+    )
+    try:
+        hold_one_in_flight(r, inner)
+        r.record(Event("a"))  # fills the buffer
+        done = threading.Event()
+
+        def produce() -> None:
+            end_event(Event("auto"), r, _LOG)
+            done.set()
+
+        threading.Thread(target=produce, daemon=True).start()
+        assert wait_until(lambda: len(r._cond._waiters) == 1)  # type: ignore[attr-defined]
+        inner.gate.release(10)
+        assert done.wait(3)
+        r.flush(timeout=2)
+        assert _actions(inner) == ["inflight", "a", "auto"]
+        assert reports == []
+    finally:
+        inner.gate.release(10)
         r.close()

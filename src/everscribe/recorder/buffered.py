@@ -21,7 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from ..event import Event, prepare_event
+from ..event import Event, is_auto_recording, prepare_event
 from ..event.types import Logger
 from .base import Recorder
 from .deliver import deliver
@@ -43,6 +43,8 @@ _MAX_DURATION = 30 * 365 * 24 * 3600.0
 _MAX_SIZE = 1 << 31
 # How long close waits for a cancelled worker before giving up on it.
 _CLOSE_GRACE = 1.0
+# How long an auto-record waits under BLOCK before reporting a drop.
+AUTO_RECORD_TIMEOUT = 15.0
 
 
 def _duration(v: float | None, default: float) -> float:
@@ -92,7 +94,8 @@ class OverflowPolicy(str, Enum):
     #: sustained pressure. Warns on the first drop and every 1000th after.
     DROP_NEWEST = "drop-newest"
     #: Block the caller until space is available (or the recorder closes).
-    #: Preserves every event but adds unbounded latency.
+    #: Preserves every event but adds unbounded latency. An auto-record
+    #: (``end_event``) gives up after 15 s and reports ``BUFFER_FULL``.
     BLOCK = "block"
     #: Raise :class:`BufferFullError` immediately.
     ERROR = "error"
@@ -198,7 +201,9 @@ class BufferedRecorder:
         """Enqueue an event for asynchronous delivery. Empty-``action`` events
         are no-ops. Behavior when the buffer is full follows the configured
         :class:`OverflowPolicy`. Calls after :meth:`close`, or once the worker
-        has stopped, report the event to ``on_drop`` as ``CLOSED``.
+        has stopped, report the event to ``on_drop`` as ``CLOSED``. An
+        overflow error during an auto-record is reported as ``BUFFER_FULL``
+        and raised; a direct caller just gets the error.
 
         ``prepare_event`` runs here, on the calling thread, so the in-scope
         status capture (and request context) is applied before the event is
@@ -207,8 +212,12 @@ class BufferedRecorder:
             return
         # Decide under the lock, report the drop after releasing it.
         drop: DropReason | None = None
+        err: Exception | None = None
         # Mark the event first so end_event cannot report it a second time.
         prepare_event(e)
+        # end_event claims the dedupe flag before calling record, so no
+        # Go-style pending skip is needed here.
+        auto = is_auto_recording(e)
         with self._cond:
             # A stopped worker (it died) drains nothing, so report CLOSED.
             if self._closed or self._stopped:
@@ -216,16 +225,16 @@ class BufferedRecorder:
             else:
                 if len(self._buf) >= self._buffer_size:
                     if self._overflow is OverflowPolicy.ERROR:
-                        raise BufferFullError()
-                    if self._overflow is OverflowPolicy.BLOCK:
-                        while (
-                            len(self._buf) >= self._buffer_size
-                            and not self._closed
-                            and not self._stopped
-                        ):
-                            self._cond.wait()
-                        if self._closed or self._stopped:
-                            drop = DropReason.CLOSED
+                        if not auto:
+                            raise BufferFullError()
+                        drop, err = DropReason.BUFFER_FULL, BufferFullError()
+                    elif self._overflow is OverflowPolicy.BLOCK:
+                        if self._wait_for_space(auto):
+                            if self._closed or self._stopped:
+                                drop = DropReason.CLOSED
+                        else:
+                            drop = DropReason.BUFFER_FULL
+                            err = TimeoutError("recorder: auto-record timed out on a full buffer")
                     else:  # DROP_NEWEST
                         drop = DropReason.BUFFER_FULL
                 if drop is None:
@@ -236,7 +245,10 @@ class BufferedRecorder:
                         self._cond.notify_all()
         if drop is None:
             return
-        n = self._report_drop([e], drop)
+        n = self._report_drop([e], drop, err)
+        if err is not None:
+            # Auto-record has no caller to return to: reported, then raised for end_event to log.
+            raise err
         if drop is DropReason.BUFFER_FULL and (n == 1 or n % 1000 == 0):
             self._logger.warning(
                 "everscribe: recorder buffer full, event dropped "
@@ -245,6 +257,20 @@ class BufferedRecorder:
                 n,
                 self._buffer_size,
             )
+
+    def _wait_for_space(self, bounded: bool) -> bool:
+        """Wait under ``_cond`` until space frees or the recorder closes or
+        stops. Returns False only if a bounded wait times out first."""
+        deadline = time.monotonic() + AUTO_RECORD_TIMEOUT if bounded else None
+        while len(self._buf) >= self._buffer_size and not self._closed and not self._stopped:
+            if deadline is None:
+                self._cond.wait()
+                continue
+            left = deadline - time.monotonic()
+            if not left > 0:
+                return False
+            self._cond.wait(min(left, threading.TIMEOUT_MAX))
+        return True
 
     def _report_drop(
         self,
