@@ -12,6 +12,7 @@ from .buffered import (
     BufferedRecorder,
     OverflowPolicy,
 )
+from .drop import OnDrop
 from .http import DEFAULT_BASE_URL, DEFAULT_REQUEST_TIMEOUT, HTTPRecorder, Transport
 
 
@@ -32,6 +33,7 @@ def new(
     overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
     drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
     logger: Logger | None = None,
+    on_drop: OnDrop | None = None,
 ) -> BufferedRecorder:
     """Return a :class:`BufferedRecorder` wrapping an :class:`HTTPRecorder`
     using the package defaults - the recommended way to construct a recorder.
@@ -58,6 +60,7 @@ def new(
         overflow=overflow,
         drain_timeout=drain_timeout,
         logger=logger,
+        on_drop=on_drop,
     )
 
 

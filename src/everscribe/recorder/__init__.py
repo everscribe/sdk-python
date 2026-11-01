@@ -18,6 +18,7 @@ from .buffered import (
     BufferedStats,
     OverflowPolicy,
 )
+from .drop import DroppedByReason, DropReason, OnDrop
 from .errors import BufferFullError, DrainTimeoutError, EncodeError, HTTPError, NetworkError
 from .factory import new
 from .http import (
@@ -39,6 +40,9 @@ __all__ = [
     # Config / stats
     "OverflowPolicy",
     "BufferedStats",
+    "DropReason",
+    "DroppedByReason",
+    "OnDrop",
     "Transport",
     # Errors
     "HTTPError",

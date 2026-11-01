@@ -23,6 +23,7 @@ from queue import Empty, Queue
 from ..event import Event, prepare_event
 from ..event.types import Logger
 from .base import Recorder
+from .drop import DroppedByReason, DropReason, OnDrop
 from .errors import BufferFullError, DrainTimeoutError
 
 DEFAULT_BUFFER_SIZE = 1000
@@ -50,11 +51,13 @@ class OverflowPolicy(str, Enum):
 class BufferedStats:
     """Runtime counters for observability."""
 
-    dropped: int  # total events dropped due to overflow
+    dropped: int  # events dropped on overflow; equals dropped_by_reason.buffer_full
     flushed: int  # total events successfully flushed to the inner recorder
-    flush_errs: int  # total flush calls that failed
+    flush_errs: int  # failed delivery attempts
     pending: int  # events currently in the buffer
     buffer_size: int  # buffer capacity
+    retries: int  # delivery retries performed
+    dropped_by_reason: DroppedByReason  # drops per reason
 
 
 @dataclass
@@ -78,7 +81,12 @@ class BufferedRecorder:
         overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
         drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
         logger: Logger | None = None,
+        on_drop: OnDrop | None = None,
     ) -> None:
+        """``on_drop`` is called with (events, reason, err) when events are
+        dropped. It must not block, must not call ``record``, ``flush``, or
+        ``close`` on this recorder, and may be called concurrently from
+        request threads and the worker."""
         self._inner = inner
         self._buffer_size = buffer_size
         self._flush_size = flush_size
@@ -92,9 +100,11 @@ class BufferedRecorder:
         self._buf: deque[Event] = deque()
         self._flush_requests: list[_FlushRequest] = []
         self._closed = False
-        self._dropped = 0
+        self._on_drop = on_drop
+        self._drops: dict[DropReason, int] = dict.fromkeys(DropReason, 0)
         self._flushed = 0
         self._flush_errs = 0
+        self._retries = 0
 
         # Detect the optional batch capability once.
         rb = getattr(inner, "record_batch", None)
@@ -117,35 +127,61 @@ class BufferedRecorder:
         handed to the worker thread."""
         if e is None or e.action == "":
             return
+        # Decide under the lock, report the drop after releasing it.
+        drop: DropReason | None = None
         with self._cond:
             if self._closed:
-                return
-            prepare_event(e)
-            if len(self._buf) >= self._buffer_size:
-                if self._overflow is OverflowPolicy.ERROR:
-                    raise BufferFullError()
-                if self._overflow is OverflowPolicy.BLOCK:
-                    while len(self._buf) >= self._buffer_size and not self._closed:
-                        self._cond.wait()
-                    if self._closed:
-                        return
-                else:  # DROP_NEWEST
-                    self._dropped += 1
-                    n = self._dropped
-                    if n == 1 or n % 1000 == 0:
-                        self._logger.warning(
-                            "everscribe: recorder buffer full, event dropped "
-                            "(action=%s dropped_total=%d buffer_size=%d)",
-                            e.action,
-                            n,
-                            self._buffer_size,
-                        )
-                    return
-            self._buf.append(copy.copy(e))
-            # notify_all (not notify): under BLOCK policy the worker and one or
-            # more blocked producers wait on the same condition, and only the
-            # worker must act on new events / flush requests.
-            self._cond.notify_all()
+                drop = DropReason.CLOSED
+            else:
+                prepare_event(e)
+                if len(self._buf) >= self._buffer_size:
+                    if self._overflow is OverflowPolicy.ERROR:
+                        raise BufferFullError()
+                    if self._overflow is OverflowPolicy.BLOCK:
+                        while len(self._buf) >= self._buffer_size and not self._closed:
+                            self._cond.wait()
+                        if self._closed:
+                            drop = DropReason.CLOSED
+                    else:  # DROP_NEWEST
+                        drop = DropReason.BUFFER_FULL
+                if drop is None:
+                    self._buf.append(copy.copy(e))
+                    # notify_all (not notify): under BLOCK policy the worker and
+                    # blocked producers share the condition; only the worker acts.
+                    self._cond.notify_all()
+        if drop is None:
+            return
+        n = self._report_drop([e], drop)
+        if drop is DropReason.BUFFER_FULL and (n == 1 or n % 1000 == 0):
+            self._logger.warning(
+                "everscribe: recorder buffer full, event dropped "
+                "(action=%s dropped_total=%d buffer_size=%d)",
+                e.action,
+                n,
+                self._buffer_size,
+            )
+
+    def _report_drop(
+        self,
+        events: list[Event],
+        reason: DropReason,
+        err: BaseException | None = None,
+    ) -> int:
+        """Count dropped events, then call ``on_drop`` outside the lock.
+        Returns the post-increment buffer_full total. Never call while
+        holding ``_cond``."""
+        with self._cond:
+            self._drops[reason] += len(events)
+            total = self._drops[DropReason.BUFFER_FULL]
+        cb = self._on_drop
+        if cb is not None:
+            try:
+                cb(list(events), reason, err)
+            except Exception as ex:  # noqa: BLE001 -- a bad callback must not break delivery
+                self._logger.error(
+                    "everscribe: on_drop callback failed (error=%s reason=%s)", ex, reason.value
+                )
+        return total
 
     def flush(self, timeout: float | None = None) -> None:
         """Force an immediate flush of all events buffered at call time and
@@ -182,11 +218,19 @@ class BufferedRecorder:
         """Return cumulative counters for observability."""
         with self._cond:
             return BufferedStats(
-                dropped=self._dropped,
+                dropped=self._drops[DropReason.BUFFER_FULL],
                 flushed=self._flushed,
                 flush_errs=self._flush_errs,
                 pending=len(self._buf),
                 buffer_size=self._buffer_size,
+                retries=self._retries,
+                dropped_by_reason=DroppedByReason(
+                    buffer_full=self._drops[DropReason.BUFFER_FULL],
+                    rejected=self._drops[DropReason.REJECTED],
+                    retries_exhausted=self._drops[DropReason.RETRIES_EXHAUSTED],
+                    shutdown=self._drops[DropReason.SHUTDOWN],
+                    closed=self._drops[DropReason.CLOSED],
+                ),
             )
 
     # -- worker ------------------------------------------------------------
