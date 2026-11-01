@@ -148,7 +148,7 @@ class _Delivery:
                     rb(p, timeout=rec._flush_timeout)
                 else:
                     rb(p)
-            except Exception as ex:  # noqa: BLE001 -- classified by the caller
+            except BaseException as ex:  # noqa: BLE001 -- e.g. SystemExit: rejected, worker lives
                 return p, ex
             with rec._cond:
                 rec._flushed += len(p)
@@ -163,7 +163,7 @@ class _Delivery:
                 return failed + p[i:], last or InterruptedError("cancelled")
             try:
                 rec._inner.record(e)
-            except Exception as ex:  # noqa: BLE001 -- classified below
+            except BaseException as ex:  # noqa: BLE001 -- classified below
                 if self.cancel.is_set():
                     return failed + p[i:], ex
                 if is_retryable(ex):

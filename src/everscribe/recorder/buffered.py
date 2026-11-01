@@ -18,7 +18,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from ..event import Event, is_auto_recording, prepare_event
@@ -54,6 +54,13 @@ def _duration(v: float | None, default: float) -> float:
     return float(min(v, _MAX_DURATION))
 
 
+def _drain(v: float | None) -> float:
+    """Seconds; None or NaN use the default, <= 0 means don't wait."""
+    if v is None or v != v:
+        return DEFAULT_DRAIN_TIMEOUT
+    return float(min(max(v, 0.0), _MAX_DURATION))
+
+
 def _size(v: int | None, default: int) -> int:
     """A count; None, <= 0, or NaN use ``default``, others clamp to [1, cap]."""
     if v is None or not v > 0:
@@ -69,7 +76,7 @@ def _wait_limit(v: float) -> float:
 def _timeout(v: float) -> float:
     """Clamp a huge flush timeout to what sockets and waits accept; other
     values pass through unchanged."""
-    if v is None or not v > 0:
+    if not v > 0:
         return v
     return float(min(v, _MAX_DURATION, threading.TIMEOUT_MAX))
 
@@ -110,8 +117,8 @@ class BufferedStats:
     flush_errs: int  # failed delivery attempts
     pending: int  # events currently in the buffer
     buffer_size: int  # buffer capacity
-    retries: int  # delivery retries performed
-    dropped_by_reason: DroppedByReason  # drops per reason
+    retries: int = 0  # delivery retries performed
+    dropped_by_reason: DroppedByReason = field(default_factory=DroppedByReason)  # drops per reason
 
 
 class BufferedRecorder:
@@ -129,9 +136,9 @@ class BufferedRecorder:
         buffer_size: int = DEFAULT_BUFFER_SIZE,
         flush_size: int | None = DEFAULT_FLUSH_SIZE,
         flush_interval: float | None = DEFAULT_FLUSH_INTERVAL,
-        flush_timeout: float = DEFAULT_FLUSH_TIMEOUT,
+        flush_timeout: float | None = DEFAULT_FLUSH_TIMEOUT,
         overflow: OverflowPolicy = OverflowPolicy.DROP_NEWEST,
-        drain_timeout: float = DEFAULT_DRAIN_TIMEOUT,
+        drain_timeout: float | None = DEFAULT_DRAIN_TIMEOUT,
         logger: Logger | None = None,
         on_drop: OnDrop | None = None,
         initial_backoff: float | None = None,
@@ -149,16 +156,21 @@ class BufferedRecorder:
         ``initial_backoff`` seconds (default 0.5), capped at ``max_backoff``
         (default 30), for up to ``max_retry_duration`` (default 300). None or
         <= 0 uses the default, as it does for ``flush_size`` and
-        ``flush_interval``."""
+        ``flush_interval``.
+
+        ``drain_timeout`` 0 or less means close doesn't wait for the drain;
+        None or NaN uses the default (30). A NaN ``flush_timeout`` uses its
+        default (30); None lets the inner use its own timeout."""
         self._inner = inner
         self._buffer_size = buffer_size
         self._flush_size = _size(flush_size, DEFAULT_FLUSH_SIZE)
         self._flush_interval = _duration(flush_interval, DEFAULT_FLUSH_INTERVAL)
         self._send_at = min(self._flush_size, buffer_size)
-        # NaN means unset, like None: the inner uses its own timeout.
-        self._flush_timeout = None if flush_timeout != flush_timeout else _timeout(flush_timeout)
+        # NaN means the default; None leaves the inner's own timeout.
+        ft = DEFAULT_FLUSH_TIMEOUT if flush_timeout != flush_timeout else flush_timeout
+        self._flush_timeout = None if ft is None else _timeout(ft)
         self._overflow = OverflowPolicy(overflow)
-        self._drain_timeout = _wait_limit(_duration(drain_timeout, DEFAULT_DRAIN_TIMEOUT))
+        self._drain_timeout = _wait_limit(_drain(drain_timeout))
         self._initial_backoff = _duration(initial_backoff, DEFAULT_INITIAL_BACKOFF)
         self._max_backoff = _duration(max_backoff, DEFAULT_MAX_BACKOFF)
         self._max_retry_duration = _duration(max_retry_duration, DEFAULT_MAX_RETRY_DURATION)

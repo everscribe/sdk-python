@@ -922,18 +922,98 @@ def test_float_flush_size_is_clamped(size: float, want: list[int]) -> None:
         r.close()
 
 
-def test_nan_flush_timeout_passes_none() -> None:
+@pytest.mark.parametrize(("ft", "want"), [(float("nan"), 30.0), (None, None)])
+def test_flush_timeout_nan_uses_default_and_none_passes_none(
+    ft: float | None, want: float | None
+) -> None:
     seen: list[float | None] = []
 
     class Inner(FakeInner):
         def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
             seen.append(timeout)
 
-    r = BufferedRecorder(Inner(), flush_timeout=float("nan"), **_QUIET)
+    r = BufferedRecorder(Inner(), flush_timeout=ft, **_QUIET)  # type: ignore[arg-type]
     try:
         r.record(Event("a"))
         r.flush(timeout=2)
-        assert seen == [None]
+        assert seen == [want]
+    finally:
+        r.close()
+
+
+@pytest.mark.parametrize("drain", [0, -1.0])
+def test_zero_drain_timeout_does_not_wait(drain: float) -> None:
+    inner = HungInner()
+    drops: Drops = []
+    r = BufferedRecorder(
+        inner, flush_size=1, flush_interval=3600.0, drain_timeout=drain, on_drop=_collect(drops)
+    )
+    try:
+        r.record(Event("a"))
+        assert inner.entered.wait(2)
+        r.record(Event("b"))
+        start = time.monotonic()
+        t, out = _close_in_thread(r)
+        t.join(5)
+        assert not t.is_alive()
+        assert time.monotonic() - start < 5
+        assert isinstance(out[0], DrainTimeoutError)
+        assert drops == [(["b"], DropReason.SHUTDOWN)]
+    finally:
+        inner.release.set()
+
+
+@pytest.mark.parametrize("drain", [None, float("nan")])
+def test_unset_drain_timeout_uses_default(drain: float | None) -> None:
+    r = BufferedRecorder(FakeInner(), drain_timeout=drain, **_QUIET)  # type: ignore[arg-type]
+    try:
+        assert r._drain_timeout == buffered.DEFAULT_DRAIN_TIMEOUT
+    finally:
+        r.close()
+
+
+class _Exit(FakeInner):
+    """Raises SystemExit on the first send, then delivers."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.raised = False
+
+    def _maybe_exit(self) -> None:
+        with self.lock:
+            first, self.raised = not self.raised, True
+        if first:
+            raise SystemExit(3)
+
+
+class _ExitBatch(_Exit):
+    def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
+        self._maybe_exit()
+        super().record_batch(events, timeout=timeout)
+
+
+class _ExitSerial(_Exit):
+    record_batch = None  # type: ignore[assignment]
+
+    def record(self, e: Event, *, timeout: float | None = None) -> None:
+        self._maybe_exit()
+        super().record(e, timeout=timeout)
+
+
+@pytest.mark.parametrize("cls", [_ExitBatch, _ExitSerial])
+def test_inner_base_exception_rejects_and_worker_survives(cls: type[_Exit]) -> None:
+    inner = cls()
+    reports: Reports = []
+    r = BufferedRecorder(inner, flush_size=1, flush_interval=3600.0, on_drop=_collect_err(reports))
+    try:
+        r.record(Event("a"))
+        r.flush(timeout=2)
+        r.record(Event("b"))
+        r.flush(timeout=2)
+        assert [(a, reason) for a, reason, _ in reports] == [(["a"], DropReason.REJECTED)]
+        assert isinstance(reports[0][2], SystemExit)
+        assert [e.action for e in inner.all_events()] == ["b"]
+        assert r._thread.is_alive()
     finally:
         r.close()
 
