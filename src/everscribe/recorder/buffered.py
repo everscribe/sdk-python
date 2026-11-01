@@ -197,8 +197,8 @@ class BufferedRecorder:
     def record(self, e: Event) -> None:
         """Enqueue an event for asynchronous delivery. Empty-``action`` events
         are no-ops. Behavior when the buffer is full follows the configured
-        :class:`OverflowPolicy`. Calls after :meth:`close` report the event
-        to ``on_drop`` as ``CLOSED``.
+        :class:`OverflowPolicy`. Calls after :meth:`close`, or once the worker
+        has stopped, report the event to ``on_drop`` as ``CLOSED``.
 
         ``prepare_event`` runs here, on the calling thread, so the in-scope
         status capture (and request context) is applied before the event is

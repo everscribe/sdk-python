@@ -795,7 +795,7 @@ def test_record_after_worker_died_reports_closed(overflow: OverflowPolicy) -> No
     r = BufferedRecorder(
         inner, buffer_size=1, flush_size=1, flush_interval=3600.0, overflow=overflow, on_drop=cb
     )
-    r.record(Event("bad"))  # buffer full: the worker takes it and dies
+    r.record(Event("bad"))  # the worker takes it and dies
     assert wait_until(lambda: not r._thread.is_alive())
     done = threading.Event()
 
@@ -804,10 +804,58 @@ def test_record_after_worker_died_reports_closed(overflow: OverflowPolicy) -> No
         done.set()
 
     threading.Thread(target=produce, daemon=True).start()
-    assert done.wait(2)  # a BLOCK producer doesn't hang
+    assert done.wait(2)  # reported at once, under every policy
     assert drops == [(["bad"], DropReason.REJECTED), (["late"], DropReason.CLOSED)]
     r.flush(timeout=1)
     r.close()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_block_producer_parked_when_worker_dies_reports_closed() -> None:
+    inner = HungInner()
+    inner.after = HTTPError(400, "bad")
+    drops: Drops = []
+
+    def cb(evs: list[Event], reason: DropReason, _x: BaseException | None) -> None:
+        drops.append(([e.action for e in evs], reason))
+        if reason is DropReason.REJECTED:
+            raise _Bail
+
+    r = BufferedRecorder(
+        inner,
+        buffer_size=1,
+        flush_size=1,
+        flush_interval=3600.0,
+        overflow=OverflowPolicy.BLOCK,
+        on_drop=cb,
+    )
+    try:
+        r.record(Event("bad"))
+        assert inner.entered.wait(2)  # [bad] in flight
+        r.record(Event("x"))  # fills the buffer
+        done = threading.Event()
+
+        def produce() -> None:
+            r.record(Event("late"))
+            done.set()
+
+        threading.Thread(target=produce, daemon=True).start()
+        # The producer is the only waiter while the worker is in the send.
+        assert wait_until(lambda: len(r._cond._waiters) == 1)  # type: ignore[attr-defined]
+        inner.release.set()  # 400, on_drop raises, the worker dies
+        assert done.wait(2)
+        assert wait_until(lambda: len(drops) == 3)
+        assert sorted(drops) == sorted(
+            [
+                (["bad"], DropReason.REJECTED),
+                (["x"], DropReason.SHUTDOWN),
+                (["late"], DropReason.CLOSED),
+            ]
+        )
+        assert r.stats().pending == 0
+        r.close()
+    finally:
+        inner.release.set()
 
 
 def test_interrupted_close_can_be_retried(monkeypatch: pytest.MonkeyPatch) -> None:
