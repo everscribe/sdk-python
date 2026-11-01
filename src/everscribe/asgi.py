@@ -40,8 +40,7 @@ try:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 except ImportError as e:  # pragma: no cover - exercised via install extras
     raise ImportError(
-        "everscribe.asgi requires Starlette. Install it with: "
-        'pip install "everscribe[fastapi]"'
+        'everscribe.asgi requires Starlette. Install it with: pip install "everscribe[fastapi]"'
     ) from e
 
 from .event import (

@@ -90,9 +90,7 @@ class Event:
         self.change = Change(before=before_out, after=after_out)
         return self
 
-    def raw_diff(
-        self, before: Any = None, after: Any = None, patch: Any = None
-    ) -> Event:
+    def raw_diff(self, before: Any = None, after: Any = None, patch: Any = None) -> Event:
         """Escape hatch for callers that already have JSON-shaped before/after
         state, or who want to supply their own precomputed RFC 6902 patch. Any
         of the three may be ``None``; if all three are ``None``, the call is a

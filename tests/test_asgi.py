@@ -31,9 +31,7 @@ def make_app(
     resolve_actor: ActorResolver | None = None,
 ) -> Starlette:
     app = Starlette(routes=routes)
-    app.add_middleware(
-        EverscribeMiddleware, recorder=recorder, resolve_actor=resolve_actor
-    )
+    app.add_middleware(EverscribeMiddleware, recorder=recorder, resolve_actor=resolve_actor)
     return app
 
 

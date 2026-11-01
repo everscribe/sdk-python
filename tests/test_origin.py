@@ -6,9 +6,7 @@ from everscribe.event import Origin, client_ip, origin_from_request
 
 
 def test_origin_from_headers_and_remote_addr() -> None:
-    o = origin_from_request(
-        {"User-Agent": "curl/8", "X-Request-ID": "req-1"}, "9.9.9.9"
-    )
+    o = origin_from_request({"User-Agent": "curl/8", "X-Request-ID": "req-1"}, "9.9.9.9")
     assert o == Origin(ip="9.9.9.9", user_agent="curl/8", request_id="req-1")
 
 

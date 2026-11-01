@@ -11,9 +11,7 @@ from collections.abc import Mapping
 from .types import Origin
 
 
-def origin_from_request(
-    headers: Mapping[str, str] | None, remote_addr: str = ""
-) -> Origin:
+def origin_from_request(headers: Mapping[str, str] | None, remote_addr: str = "") -> Origin:
     """Extract network context from request headers and a remote address.
     Respects ``X-Forwarded-For`` (first entry) and ``X-Real-IP`` before
     falling back to ``remote_addr``. Callers behind a proxy should sanitize

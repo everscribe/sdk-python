@@ -33,9 +33,7 @@ class FakeInner:
         self.fail: BaseException | None = None
         self.block: threading.Event | None = None
 
-    def record_batch(
-        self, events: Sequence[Event], *, timeout: float | None = None
-    ) -> None:
+    def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
         if self.block is not None:
             self.block.wait(timeout=5)
         if self.fail is not None:
@@ -164,9 +162,7 @@ def test_flush_after_close_is_noop() -> None:
 
 def test_overflow_drop_newest() -> None:
     inner = FakeInner()
-    r = BufferedRecorder(
-        inner, buffer_size=1, overflow=OverflowPolicy.DROP_NEWEST, **_QUIET
-    )
+    r = BufferedRecorder(inner, buffer_size=1, overflow=OverflowPolicy.DROP_NEWEST, **_QUIET)
     try:
         r.record(Event("a"))  # fills buffer
         r.record(Event("b"))  # dropped

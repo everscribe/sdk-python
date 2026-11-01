@@ -42,8 +42,7 @@ try:
     from flask import Flask, Response, g, request
 except ImportError as e:  # pragma: no cover - exercised via install extras
     raise ImportError(
-        "everscribe.flask requires Flask. Install it with: "
-        'pip install "everscribe[flask]"'
+        'everscribe.flask requires Flask. Install it with: pip install "everscribe[flask]"'
     ) from e
 
 from .event import (

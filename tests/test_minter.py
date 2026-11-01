@@ -128,9 +128,7 @@ def test_allowed_fields_empty_rejected() -> None:
 
 def test_allow_flags_only_when_true() -> None:
     assert token_options_to_wire(TokenOptions()) == {}
-    assert token_options_to_wire(TokenOptions(allow_dsl_input=True)) == {
-        "allow_dsl_input": True
-    }
+    assert token_options_to_wire(TokenOptions(allow_dsl_input=True)) == {"allow_dsl_input": True}
     assert token_options_to_wire(TokenOptions(allow_nlp=True)) == {"allow_nlp": True}
 
 
@@ -226,9 +224,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
-        type(self).received.append(
-            (self.path, body, self.headers.get("Authorization", ""))
-        )
+        type(self).received.append((self.path, body, self.headers.get("Authorization", "")))
         self.send_response(type(self).reply_status)
         self.end_headers()
         self.wfile.write(type(self).reply_body)

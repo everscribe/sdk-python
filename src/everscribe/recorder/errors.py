@@ -33,9 +33,7 @@ class DrainTimeoutError(Exception):
     """Raised by :class:`BufferedRecorder.close` when the drain timeout
     elapses with events still pending."""
 
-    def __init__(
-        self, message: str = "recorder: drain timed out with events pending"
-    ) -> None:
+    def __init__(self, message: str = "recorder: drain timed out with events pending") -> None:
         super().__init__(message)
 
 

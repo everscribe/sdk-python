@@ -36,8 +36,7 @@ try:
     from django.http import HttpRequest, HttpResponse
 except ImportError as e:  # pragma: no cover - exercised via install extras
     raise ImportError(
-        "everscribe.django requires Django. Install it with: "
-        'pip install "everscribe[django]"'
+        'everscribe.django requires Django. Install it with: pip install "everscribe[django]"'
     ) from e
 
 from .event import (
@@ -147,7 +146,9 @@ class EverscribeMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         template = Event()
         template.actor = self.resolve_actor(request)
-        template.origin = origin_from_request(dict(request.headers), request.META.get("REMOTE_ADDR", ""))
+        template.origin = origin_from_request(
+            dict(request.headers), request.META.get("REMOTE_ADDR", "")
+        )
 
         capture = _OutcomeCapture()
         with request_scope(template, capture) as current:

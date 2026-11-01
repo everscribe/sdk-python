@@ -109,7 +109,9 @@ class SyncServer:
         self.recorder = recorder
         self.diagnostics: dict[str, Any] = {}
         interceptor = EverscribeServerInterceptor(recorder=recorder, resolve_actor=resolve_actor)
-        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=8), interceptors=[interceptor])
+        self.server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=8), interceptors=[interceptor]
+        )
         handlers = _sync_handlers(self.diagnostics)
         generic = grpc.method_handlers_generic_handler("test.Test", handlers)
         self.server.add_generic_rpc_handlers((generic,))
@@ -356,7 +358,9 @@ class AsyncServer:
         self.port = 0
 
     async def start(self, recorder: FakeRecorder | None = None, resolve_actor: Any = None) -> None:
-        interceptor = EverscribeAsyncServerInterceptor(recorder=recorder, resolve_actor=resolve_actor)
+        interceptor = EverscribeAsyncServerInterceptor(
+            recorder=recorder, resolve_actor=resolve_actor
+        )
         self.server = grpc_aio.server(interceptors=[interceptor])
         handlers = _async_handlers(self.diagnostics)
         generic = grpc.method_handlers_generic_handler("test.Test", handlers)

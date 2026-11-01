@@ -129,9 +129,7 @@ def current_event() -> Event:
 
 
 @contextmanager
-def event_scope(
-    template: Event, capture: OutcomeCapture | None = None
-) -> Iterator[None]:
+def event_scope(template: Event, capture: OutcomeCapture | None = None) -> Iterator[None]:
     """Context manager that installs ``template`` and ``capture`` for the
     duration of the block, with no request-scoped current event or dedupe
     state. Useful for exercising :func:`new_from_context` / :func:`prepare_event`'s
@@ -152,9 +150,7 @@ def event_scope(
         _event_context.reset(token)
 
 
-def run_with_event(
-    template: Event, capture: OutcomeCapture | None, fn: Callable[[], T]
-) -> T:
+def run_with_event(template: Event, capture: OutcomeCapture | None, fn: Callable[[], T]) -> T:
     """Run ``fn`` with ``template`` and ``capture`` installed in scope, and
     return its result. Async adapters generally prefer
     :func:`event_scope` or :func:`request_scope`."""
@@ -163,9 +159,7 @@ def run_with_event(
 
 
 @contextmanager
-def request_scope(
-    template: Event, capture: OutcomeCapture | None = None
-) -> Iterator[Event]:
+def request_scope(template: Event, capture: OutcomeCapture | None = None) -> Iterator[Event]:
     """Install ``template`` and ``capture`` for the duration of the block,
     plus a request-scoped current event that :func:`current_event` returns
     and :func:`end_event` auto-records. Yields that current event.
@@ -183,9 +177,7 @@ def request_scope(
     current = _clone_template(template)
     current.idempotency_key = current.id
     state = _RequestState(current=current)
-    token = _event_context.set(
-        _EventContext(template=template, capture=capture, state=state)
-    )
+    token = _event_context.set(_EventContext(template=template, capture=capture, state=state))
     try:
         yield current
     finally:
@@ -217,9 +209,7 @@ def prepare_event(e: Event) -> None:
         ctx.state.recorded = True
 
 
-def end_event(
-    e: Event, recorder: Recorder | None, logger: Logger | None = None
-) -> None:
+def end_event(e: Event, recorder: Recorder | None, logger: Logger | None = None) -> None:
     """Record ``e`` once, if ``recorder`` is configured and the handler
     named it (non-empty ``action``). Call exactly once, after the handler
     has genuinely finished - the in-scope :class:`OutcomeCapture` is applied

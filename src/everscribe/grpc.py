@@ -39,8 +39,7 @@ try:
     from grpc import aio as grpc_aio
 except ImportError as e:  # pragma: no cover - exercised via install extras
     raise ImportError(
-        "everscribe.grpc requires grpcio. Install it with: "
-        'pip install "everscribe[grpc]"'
+        'everscribe.grpc requires grpcio. Install it with: pip install "everscribe[grpc]"'
     ) from e
 
 from .event import (
@@ -277,7 +276,9 @@ class EverscribeServerInterceptor(grpc.ServerInterceptor):
             response_serializer=handler.response_serializer,
         )
 
-    def _wrap_unary(self, inner: Callable[[Any, Any], Any], method: str) -> Callable[[Any, Any], Any]:
+    def _wrap_unary(
+        self, inner: Callable[[Any, Any], Any], method: str
+    ) -> Callable[[Any, Any], Any]:
         """Wraps a single-response behavior. ``request`` may be a lone
         message (unary_unary) or a request iterator (stream_unary); this
         wrapper never inspects it, only forwards it, so one implementation
@@ -379,7 +380,9 @@ class EverscribeAsyncServerInterceptor(grpc_aio.ServerInterceptor):
             response_serializer=handler.response_serializer,
         )
 
-    def _wrap_unary(self, inner: Callable[[Any, Any], Any], method: str) -> Callable[[Any, Any], Any]:
+    def _wrap_unary(
+        self, inner: Callable[[Any, Any], Any], method: str
+    ) -> Callable[[Any, Any], Any]:
         async def behavior(request: Any, context: Any) -> Any:
             template = _build_template(self.resolve_actor, context, method)
             capture = _GrpcOutcomeCapture()

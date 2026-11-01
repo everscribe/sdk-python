@@ -80,9 +80,7 @@ class HTTPRecorder:
         body = json.dumps(event_to_wire(e)).encode("utf-8")
         self._post(self._events_path(), body, timeout)
 
-    def record_batch(
-        self, events: Sequence[Event], *, timeout: float | None = None
-    ) -> None:
+    def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
         """POST multiple events in one request. Empty-``action`` events are
         filtered out; an all-empty (or empty) batch is a no-op."""
         if not events:

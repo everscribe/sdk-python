@@ -187,9 +187,7 @@ def test_result_all_empty_returns_none() -> None:
 
 
 def test_result_non_string_message_preserved() -> None:
-    assert result_to_wire(Result(message={"detail": "x"})) == {
-        "message": {"detail": "x"}
-    }
+    assert result_to_wire(Result(message={"detail": "x"})) == {"message": {"detail": "x"}}
 
 
 # --- diff / raw_diff / redaction ------------------------------------------

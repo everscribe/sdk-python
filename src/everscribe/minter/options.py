@@ -78,20 +78,14 @@ def token_options_to_wire(opts: TokenOptions) -> dict[str, Any]:
     )
     if secs != 0:
         if secs < MIN_EXPIRES_IN:
-            raise ValueError(
-                f"minter: expires_in {secs}s is below minimum {MIN_EXPIRES_IN}s"
-            )
+            raise ValueError(f"minter: expires_in {secs}s is below minimum {MIN_EXPIRES_IN}s")
         if secs > MAX_EXPIRES_IN:
-            raise ValueError(
-                f"minter: expires_in {secs}s is above maximum {MAX_EXPIRES_IN}s"
-            )
+            raise ValueError(f"minter: expires_in {secs}s is above maximum {MAX_EXPIRES_IN}s")
         wire["expires_in"] = int(secs)
 
     if opts.allowed_columns is not None:
         if len(opts.allowed_columns) == 0:
-            raise ValueError(
-                "minter: allowed_columns is empty; pass None for no restriction"
-            )
+            raise ValueError("minter: allowed_columns is empty; pass None for no restriction")
         for col in opts.allowed_columns:
             if col not in ALLOWED_COLUMNS:
                 raise ValueError(f"minter: unknown column name {col!r}")
@@ -99,22 +93,17 @@ def token_options_to_wire(opts: TokenOptions) -> dict[str, Any]:
 
     if opts.allowed_actions is not None:
         if len(opts.allowed_actions) == 0:
-            raise ValueError(
-                "minter: allowed_actions is empty; pass None for no restriction"
-            )
+            raise ValueError("minter: allowed_actions is empty; pass None for no restriction")
         for a in opts.allowed_actions:
             if not _ACTION_GRAMMAR.match(a):
                 raise ValueError(
-                    f"minter: action entry {a!r} does not match grammar "
-                    f"{_ACTION_GRAMMAR_DESC}"
+                    f"minter: action entry {a!r} does not match grammar {_ACTION_GRAMMAR_DESC}"
                 )
         wire["actions"] = list(opts.allowed_actions)
 
     if opts.allowed_fields is not None:
         if len(opts.allowed_fields) == 0:
-            raise ValueError(
-                "minter: allowed_fields is empty; pass None for no restriction"
-            )
+            raise ValueError("minter: allowed_fields is empty; pass None for no restriction")
         # Field validation lives on the server (the catalog is canonical
         # there); the SDK ships entries through verbatim.
         wire["allowed_fields"] = list(opts.allowed_fields)

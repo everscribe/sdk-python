@@ -90,8 +90,8 @@ src = ["src", "tests"]
 # Select explicitly rather than inheriting ruff's default set, which widens
 # between releases and would reintroduce the drift the pinned version guards
 # against. E is scoped to the logical-error subset (E4/E7/E9); line-length and
-# whitespace formatting (E1/E2/E5) are left out, since this repo gates on a
-# linter, not a formatter, matching the Go SDK's no-gofmt-check stance.
+# whitespace formatting (E1/E2/E5) are left to `ruff format`, which the repo
+# now gates on too (`ruff format --check`).
 select = ["E4", "E7", "E9", "F", "I", "B", "C4", "DTZ", "UP", "RUF", "BLE"]
 # __all__ blocks are grouped by section with comments on purpose; RUF022's
 # isort-style sort scatters those groups. Keep the human-readable grouping.

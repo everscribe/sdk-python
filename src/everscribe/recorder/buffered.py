@@ -101,9 +101,7 @@ class BufferedRecorder:
         self._record_batch: Callable[..., None] | None = rb if callable(rb) else None
 
         self._next_flush = time.monotonic() + flush_interval
-        self._thread = threading.Thread(
-            target=self._run, name="everscribe-recorder", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="everscribe-recorder", daemon=True)
         self._thread.start()
 
     # -- public API --------------------------------------------------------
@@ -245,8 +243,7 @@ class BufferedRecorder:
                 self._flush_errs += 1
                 total = self._flush_errs
             self._logger.error(
-                "everscribe: recorder flush failed (error=%s batch_size=%d "
-                "flush_errs_total=%d)",
+                "everscribe: recorder flush failed (error=%s batch_size=%d flush_errs_total=%d)",
                 err,
                 n,
                 total,
