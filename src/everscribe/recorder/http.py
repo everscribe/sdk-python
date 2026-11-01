@@ -22,6 +22,7 @@ import json
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from ..event import Event, event_to_wire, prepare_event
 from .errors import EncodeError, HTTPError, NetworkError
@@ -108,9 +109,7 @@ class HTTPRecorder:
         """POST a single event. Empty-``action`` events are no-ops."""
         if e is None or e.action == "":
             return
-        prepare_event(e)
-        self._finalize(e)
-        body = _dumps(event_to_wire(e))
+        body = _dumps(self._wire(e))
         self._post(self._events_path(), body, timeout)
 
     def record_batch(self, events: Sequence[Event], *, timeout: float | None = None) -> None:
@@ -118,17 +117,21 @@ class HTTPRecorder:
         filtered out; an all-empty (or empty) batch is a no-op."""
         if not events:
             return
-        wire = []
-        for e in events:
-            if e.action == "":
-                continue
-            prepare_event(e)
-            self._finalize(e)
-            wire.append(event_to_wire(e))
+        wire = [self._wire(e) for e in events if e.action != ""]
         if not wire:
             return
         body = _dumps({"events": wire})
         self._post(self._batch_path(), body, timeout)
+
+    def _wire(self, e: Event) -> dict[str, Any]:
+        """Prepare ``e`` and convert it to its wire dict. A wrongly typed
+        field raises :class:`EncodeError`, so a batch splits around it."""
+        try:
+            prepare_event(e)
+            self._finalize(e)
+            return event_to_wire(e)
+        except (TypeError, ValueError, AttributeError) as ex:
+            raise EncodeError(f"recorder: encode event: {ex}") from ex
 
     def _finalize(self, e: Event) -> None:
         """Post-``prepare_event`` fixups: copy id into idempotency_key when
@@ -153,6 +156,8 @@ class HTTPRecorder:
             res = self._transport(self.base_url + path, body, headers, t)
         except urllib.error.HTTPError as e:  # an OSError; keep the status
             res = (e.code, _read_error_body(e), dict(e.headers.items()) if e.headers else {})
+        except NetworkError:  # an OSError too; don't wrap it twice
+            raise
         except (OSError, http.client.HTTPException) as e:
             raise NetworkError(f"recorder: {e}") from e
         status, resp_body = res[0], res[1]

@@ -39,6 +39,8 @@ class _NotTransient(Exception):
         (HTTPError(413, ""), False),
         (EncodeError("x"), False),
         (TypeError("x"), False),
+        (ValueError("x"), False),
+        (OSError("x"), False),
         (RuntimeError("x"), False),
         (_NotTransient(), False),
     ],
@@ -59,6 +61,8 @@ def test_is_retryable(err: BaseException, want: bool) -> None:
         (HTTPError(404, ""), False),
         (HTTPError(500, ""), False),
         (TypeError("x"), False),
+        (ValueError("x"), False),
+        (NetworkError("x"), False),
     ],
 )
 def test_is_splittable(err: BaseException, want: bool) -> None:

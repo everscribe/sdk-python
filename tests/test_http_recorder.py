@@ -320,3 +320,68 @@ def test_transport_urllib_http_error_becomes_http_error() -> None:
     assert ei.value.body == "down"
     assert ei.value.retry_after == 4.0
     assert ei.value.transient() is True
+
+
+def test_bad_field_in_batch_rejects_only_that_event() -> None:
+    from everscribe.recorder import BufferedRecorder, DropReason
+
+    t = RecordingTransport()
+    inner = HTTPRecorder("p", "k", transport=t)
+    drops: list[tuple[str, DropReason, BaseException | None]] = []
+    r = BufferedRecorder(
+        inner,
+        flush_size=10,
+        flush_interval=3600.0,
+        on_drop=lambda evs, reason, err: drops.extend((e.action, reason, err) for e in evs),
+    )
+    try:
+        for i in range(10):
+            ev = Event(f"e{i}")
+            if i == 4:
+                ev.occurred_at = "2026-01-01"  # type: ignore[assignment]
+            r.record(ev)
+        r.flush(timeout=5)
+    finally:
+        r.close()
+    sent = [w["action"] for _, body, _, _ in t.calls for w in json.loads(body)["events"]]
+    assert sorted(sent) == sorted(f"e{i}" for i in range(10) if i != 4)
+    assert len(drops) == 1
+    assert drops[0][:2] == ("e4", DropReason.REJECTED)
+    assert isinstance(drops[0][2], EncodeError)
+
+
+def test_bad_field_is_encode_error_for_single_record() -> None:
+    t = RecordingTransport()
+    r = HTTPRecorder("p", "k", transport=t)
+    ev = Event("a")
+    ev.occurred_at = "2026-01-01"  # type: ignore[assignment]
+    with pytest.raises(EncodeError):
+        r.record(ev)
+    assert t.calls == []
+
+
+def test_error_types_keep_0_1_0_bases() -> None:
+    assert isinstance(NetworkError("x"), OSError)
+    enc = EncodeError("x")
+    assert isinstance(enc, TypeError)
+    assert isinstance(enc, ValueError)
+
+
+def test_transport_network_error_is_not_rewrapped() -> None:
+    err = NetworkError("custom")
+
+    def t(url: str, body: bytes, headers: Mapping[str, str], timeout: float):
+        raise err
+
+    r = HTTPRecorder("p", "k", transport=t)
+    with pytest.raises(NetworkError) as ei:
+        r.record(Event("a"))
+    assert ei.value is err
+
+
+def test_hand_built_stats_need_only_0_1_0_fields() -> None:
+    from everscribe.recorder import BufferedStats, DroppedByReason
+
+    s = BufferedStats(dropped=0, flushed=0, flush_errs=0, pending=0, buffer_size=1)
+    assert s.retries == 0
+    assert s.dropped_by_reason == DroppedByReason()

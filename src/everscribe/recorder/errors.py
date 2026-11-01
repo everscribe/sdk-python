@@ -21,19 +21,21 @@ class HTTPError(Exception):
         return self.status_code >= 500 or self.status_code == 429
 
 
-class NetworkError(Exception):
+class NetworkError(OSError):
     """Raised by :class:`HTTPRecorder` when the transport fails before a
     response arrives (connection refused, timeout, reset). The original
-    exception is on ``__cause__``. Always transient."""
+    exception is on ``__cause__``. Always transient. An ``OSError``, so
+    code that caught 0.1.0's raw transport errors still catches it."""
 
     def transient(self) -> bool:
         return True
 
 
-class EncodeError(Exception):
-    """Raised by :class:`HTTPRecorder` when an event cannot be serialized to
-    JSON (the original ``TypeError``/``ValueError`` is on ``__cause__``).
-    Nothing is sent."""
+class EncodeError(TypeError, ValueError):
+    """Raised by :class:`HTTPRecorder` when an event cannot be serialized
+    (a wrongly typed field, or JSON encoding failed; the original error is
+    on ``__cause__``). Nothing is sent. Both a ``TypeError`` and a
+    ``ValueError``, as 0.1.0's raw errors were."""
 
 
 class BufferFullError(Exception):
